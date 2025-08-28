@@ -1,0 +1,16 @@
+/* src/index.css */
+@import "tailwindcss";
+
+/* Brand tokens from your logo */
+:root{
+  --bg:#0A1E2D;        /* deep space */
+  --card:#0F2A3B;      /* card surface */
+  --text:#E6F1F8;      /* primary text */
+  --muted:#94A3B8;     /* secondary text */
+  --primary:#27F36A;   /* neon green */
+  --accent:#00E5FF;    /* cyan */
+}
+
+html, body, #root { height:100%; }
+body { background:var(--bg); color:var(--text); }
+a { color: var(--accent); }
