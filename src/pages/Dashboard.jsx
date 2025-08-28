@@ -5,7 +5,7 @@ import { api } from "../api/axios";
 
 import MarketClocks from "../components/MarketClocks";
 import KPICard from "../components/KPICard";
-import Watchlist from "../components/Watchlist";
+import Watchlist from "../components/watchlist";
 import ChartCard from "../components/chartcard";
 import NewsFeed from "../components/NewsFeed";
 import ForexCalendar from "../components/ForexCalendar";
@@ -357,5 +357,6 @@ export default function Dashboard() {
     </div>
   );
 }
+
 
 
