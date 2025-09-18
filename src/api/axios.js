@@ -1,6 +1,11 @@
 // src/api/axios.js
 import axios from "axios";
 
+/**
+ * Base API URL:
+ * - Uses Vercel env var in prod: VITE_API_BASE_URL = https://<your-api>.onrender.com
+ * - Falls back to localhost for dev.
+ */
 const BASE =
   (import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "")) ||
   "http://127.0.0.1:8000";
@@ -8,11 +13,12 @@ const BASE =
 // Create an axios instance for app API calls
 export const api = axios.create({
   baseURL: BASE,
-  withCredentials: false,
+  withCredentials: false, // keep false for Bearer-token auth
 });
 
 // --- Helpers ---
-const AUTH_SKIP_REGEX = /\/api\/users\/(login|register|reset|password|verify|activate)\//i;
+const AUTH_SKIP_REGEX =
+  /\/api\/users\/(login|register|reset|password|verify|activate|token\/refresh)\/?$/i;
 
 function broadcastLogoutAndRedirect() {
   try {
@@ -67,7 +73,9 @@ api.interceptors.response.use(
             })
             .finally(() => {
               // reset after completion (success or failure)
-              setTimeout(() => { refreshingPromise = null; }, 0);
+              setTimeout(() => {
+                refreshingPromise = null;
+              }, 0);
             });
         }
 
@@ -79,7 +87,10 @@ api.interceptors.response.use(
 
         // Retry original request once with new token
         config.__isRetry = true;
-        config.headers = { ...(config.headers || {}), Authorization: `Bearer ${newAccess}` };
+        config.headers = {
+          ...(config.headers || {}),
+          Authorization: `Bearer ${newAccess}`,
+        };
         return api.request(config);
       } catch (e) {
         // Refresh failed → logout & redirect

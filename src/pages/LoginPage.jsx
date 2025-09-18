@@ -17,7 +17,6 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
-      // ✅ Correct endpoint
       const res = await api.post("/api/users/token/", { username, password });
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
@@ -53,6 +52,7 @@ export default function LoginPage() {
             <input
               type="text"
               value={username}
+              autoComplete="username"
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
             />
@@ -62,6 +62,7 @@ export default function LoginPage() {
             <input
               type="password"
               value={password}
+              autoComplete="current-password"
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
             />
@@ -78,10 +79,20 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 text-center text-sm text-[color:var(--muted)]">
-             Need an account? <Link to="/request-access" className="underline">Request access</Link>
+        {/* Auth links */}
+        <div className="mt-4 text-center text-sm text-[color:var(--muted)] space-y-2">
+          <div>
+            Don&apos;t have an account?{" "}
+            <Link to="/register" className="underline">Register</Link>
+          </div>
+          <div>
+            <Link to="/reset-password" className="underline">Forgot password?</Link>
+          </div>
+          <div>
+            Want to subscribe? Visit the{" "}
+            <Link to="/pricing" className="underline">Pricing</Link> page.
+          </div>
         </div>
-
       </div>
     </div>
   );
