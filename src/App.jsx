@@ -13,6 +13,7 @@ import {
 import LoginPage from "./pages/LoginPage.jsx";
 import RegisterPage from "./pages/RegisterPage.jsx";
 import ResetPasswordRequest from "./pages/ResetPasswordRequest.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import TraderLab from "./pages/TraderLab.jsx";
 import Backtesting from "./pages/Backtesting.jsx";
@@ -97,7 +98,11 @@ export default function App() {
         <Route path="/register" element={<RegisterPage />} />
         {/* keep old link working too */}
         <Route path="/request-access" element={<RegisterPage />} />
+
+        {/* Reset password flow */}
         <Route path="/reset-password" element={<ResetPasswordRequest />} />
+        <Route path="/reset-password/:uid/:token" element={<ResetPassword />} />
+
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/thank-you" element={<ThankYou />} />
 

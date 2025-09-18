@@ -4,6 +4,8 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
+const STRIPE_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK;
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -27,7 +29,7 @@ export default function LoginPage() {
     } catch (err) {
       console.error("login failed", err);
       if (err.response?.status === 404) {
-        setError("API endpoint not found. Check API base URL and backend routes.");
+        setError("API not found. Check VITE_API_BASE_URL and backend routes.");
       } else if (err.response?.status === 401) {
         setError("Invalid username or password.");
       } else {
@@ -36,6 +38,14 @@ export default function LoginPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleRequestAccess() {
+    if (!STRIPE_LINK) {
+      setError("Payment link is not configured. Add VITE_STRIPE_PAYMENT_LINK to your env.");
+      return;
+    }
+    window.location.assign(STRIPE_LINK);
   }
 
   return (
@@ -54,6 +64,7 @@ export default function LoginPage() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
+              autoComplete="username"
             />
           </div>
           <div>
@@ -63,10 +74,11 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
+              autoComplete="current-password"
             />
           </div>
 
-          {error && <div className="text-red-400 text-sm">{error}</div>}
+        {error && <div className="text-red-400 text-sm">{error}</div>}
 
           <button
             type="submit"
@@ -77,9 +89,16 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 text-center text-sm text-[color:var(--muted)]">
-          Need an account?{" "}
-          <Link to="/register" className="underline">Create one</Link>
+        <div className="mt-4 text-center text-sm text-[color:var(--muted)] space-y-2">
+          <div>
+            <Link to="/reset-password" className="underline">Forgot password?</Link>
+          </div>
+          <div>
+            Need an account?{" "}
+            <button type="button" onClick={handleRequestAccess} className="underline text-[color:var(--accent)]">
+              Request access
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
-const RESET_ENDPOINT = "/api/users/password/reset/"; // adjust if your backend uses a different URL
+const RESET_ENDPOINT = "/api/users/password/reset/";
 
 export default function ResetPasswordRequest() {
   const [email, setEmail] = useState("");
@@ -18,7 +18,7 @@ export default function ResetPasswordRequest() {
     setBusy(true);
     try {
       await api.post(RESET_ENDPOINT, { email });
-      setSent(true);
+      setSent(true); // always 200 from backend (doesn't leak if email exists)
     } catch (err) {
       console.error("reset request failed", err);
       if (err.response?.status === 404) {
