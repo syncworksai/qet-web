@@ -22,7 +22,7 @@ import Pricing from "./pages/Pricing.jsx";
 import ThankYou from "./pages/ThankYou.jsx";
 import logo from "./assets/QELOGO.png";
 
-/* -------------------- Auth guard -------------------- */
+// --- Auth guard ---
 function ProtectedRoute({ children }) {
   const location = useLocation();
   const access = localStorage.getItem("access");
@@ -32,7 +32,7 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-/* -------------------- Navbar -------------------- */
+// --- Navbar ---
 function Navbar() {
   const navigate = useNavigate();
   const [isAuthed, setIsAuthed] = useState(!!localStorage.getItem("access"));
@@ -78,9 +78,8 @@ function Navbar() {
         ) : (
           <div className="flex items-center gap-3">
             <Link to="/pricing" className={navBtn}>Pricing</Link>
-            <Link to="/login" className={navBtn}>Login</Link>
-            {/* NEW: visible register entry point */}
             <Link to="/register" className={navBtn}>Register</Link>
+            <Link to="/login" className={navBtn}>Login</Link>
           </div>
         )}
       </div>
@@ -88,7 +87,6 @@ function Navbar() {
   );
 }
 
-/* -------------------- App -------------------- */
 export default function App() {
   return (
     <Router>
@@ -97,6 +95,8 @@ export default function App() {
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* keep old link working too */}
+        <Route path="/request-access" element={<RegisterPage />} />
         <Route path="/reset-password" element={<ResetPasswordRequest />} />
         <Route path="/pricing" element={<Pricing />} />
         <Route path="/thank-you" element={<ThankYou />} />

@@ -27,7 +27,7 @@ export default function LoginPage() {
     } catch (err) {
       console.error("login failed", err);
       if (err.response?.status === 404) {
-        setError("API endpoint not found. Check your API base URL and backend routes.");
+        setError("API endpoint not found. Check API base URL and backend routes.");
       } else if (err.response?.status === 401) {
         setError("Invalid username or password.");
       } else {
@@ -52,7 +52,6 @@ export default function LoginPage() {
             <input
               type="text"
               value={username}
-              autoComplete="username"
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
             />
@@ -62,7 +61,6 @@ export default function LoginPage() {
             <input
               type="password"
               value={password}
-              autoComplete="current-password"
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
             />
@@ -79,19 +77,9 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Auth links */}
-        <div className="mt-4 text-center text-sm text-[color:var(--muted)] space-y-2">
-          <div>
-            Don&apos;t have an account?{" "}
-            <Link to="/register" className="underline">Register</Link>
-          </div>
-          <div>
-            <Link to="/reset-password" className="underline">Forgot password?</Link>
-          </div>
-          <div>
-            Want to subscribe? Visit the{" "}
-            <Link to="/pricing" className="underline">Pricing</Link> page.
-          </div>
+        <div className="mt-4 text-center text-sm text-[color:var(--muted)]">
+          Need an account?{" "}
+          <Link to="/register" className="underline">Create one</Link>
         </div>
       </div>
     </div>
