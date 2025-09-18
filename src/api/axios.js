@@ -3,7 +3,7 @@ import axios from "axios";
 
 /**
  * Base API URL:
- * - Uses Vercel env var in prod: VITE_API_BASE_URL = https://<your-api>.onrender.com
+ * - Uses env in prod: VITE_API_BASE_URL = https://<your-api>.onrender.com
  * - Falls back to localhost for dev.
  */
 const BASE =
@@ -13,21 +13,27 @@ const BASE =
 // Create an axios instance for app API calls
 export const api = axios.create({
   baseURL: BASE,
-  withCredentials: false, // keep false for Bearer-token auth
+  withCredentials: false, // Bearer token auth, no cookies
+  headers: {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  },
 });
 
 // --- Helpers ---
+
+// Skip refresh logic on auth endpoints like /api/users/token/ and /api/users/token/refresh/
 const AUTH_SKIP_REGEX =
-  /\/api\/users\/(login|register|reset|password|verify|activate|token\/refresh)\/?$/i;
+  /\/api\/users\/(token(?:\/refresh)?|register|reset|password|verify|activate)\/?$/i;
 
 function broadcastLogoutAndRedirect() {
   try {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
-    // notify navbar / other tabs
-    window.dispatchEvent(new Event("storage"));
+    // Real cross-tab signal: this triggers 'storage' in other tabs
+    localStorage.setItem("auth_event", `logout:${Date.now()}`);
   } catch {}
-  // force to login route
+  // Force to login route
   if (typeof window !== "undefined") window.location.assign("/login");
 }
 
@@ -62,7 +68,9 @@ api.interceptors.response.use(
         if (!refreshingPromise) {
           // IMPORTANT: use base axios (not `api`) so we don't recurse interceptors
           refreshingPromise = axios
-            .post(`${BASE}/api/users/token/refresh/`, { refresh })
+            .post(`${BASE}/api/users/token/refresh/`, { refresh }, {
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+            })
             .then((res) => {
               const newAccess = res.data?.access;
               if (newAccess) {
@@ -103,3 +111,5 @@ api.interceptors.response.use(
     throw error;
   }
 );
+
+export default api;
