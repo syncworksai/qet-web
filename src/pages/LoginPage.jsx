@@ -4,11 +4,10 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
-const STRIPE_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK;
-
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
+
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,6 +18,7 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
+      // JWT token endpoint
       const res = await api.post("/api/users/token/", { username, password });
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
@@ -41,11 +41,8 @@ export default function LoginPage() {
   }
 
   function handleRequestAccess() {
-    if (!STRIPE_LINK) {
-      setError("Payment link is not configured. Add VITE_STRIPE_PAYMENT_LINK to your env.");
-      return;
-    }
-    window.location.assign(STRIPE_LINK);
+    // Go to Register page so users create an account first
+    navigate("/register");
   }
 
   return (
@@ -58,27 +55,34 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-[color:var(--muted)] mb-1">Username</label>
+            <label className="block text-xs text-[color:var(--muted)] mb-1">
+              Username
+            </label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
               autoComplete="username"
+              required
             />
           </div>
+
           <div>
-            <label className="block text-xs text-[color:var(--muted)] mb-1">Password</label>
+            <label className="block text-xs text-[color:var(--muted)] mb-1">
+              Password
+            </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
               autoComplete="current-password"
+              required
             />
           </div>
 
-        {error && <div className="text-red-400 text-sm">{error}</div>}
+          {error && <div className="text-red-400 text-sm">{error}</div>}
 
           <button
             type="submit"
@@ -91,11 +95,17 @@ export default function LoginPage() {
 
         <div className="mt-4 text-center text-sm text-[color:var(--muted)] space-y-2">
           <div>
-            <Link to="/reset-password" className="underline">Forgot password?</Link>
+            <Link to="/reset-password" className="underline">
+              Forgot password?
+            </Link>
           </div>
           <div>
             Need an account?{" "}
-            <button type="button" onClick={handleRequestAccess} className="underline text-[color:var(--accent)]">
+            <button
+              type="button"
+              onClick={handleRequestAccess}
+              className="underline text-[color:var(--accent)]"
+            >
               Request access
             </button>
           </div>
