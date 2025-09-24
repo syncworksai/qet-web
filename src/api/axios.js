@@ -2,20 +2,22 @@
 import axios from "axios";
 
 /**
- * Base API URL (build-time via Vite):
- *   VITE_API_BASE_URL = https://quantum-edge-fx.onrender.com
- * Falls back to localhost for dev.
+ * Accept either:
+ *  - VITE_API_BASE       = https://host.tld/api
+ *  - VITE_API_BASE_URL   = https://host.tld   (no /api)
+ * Normalize to ".../api".
  */
-export const BASE =
-  (import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "")) ||
+const RAW =
+  import.meta.env.VITE_API_BASE ||
+  import.meta.env.VITE_API_BASE_URL ||
   "http://127.0.0.1:8000";
 
-/**
- * PUBLIC client (no interceptors, no tokens) — use this on pages that
- * must not auto-redirect on 401 (e.g., /register, password reset).
- */
+const ROOT = RAW.replace(/\/+$/, "");           // strip trailing slashes
+export const API_BASE = /\/api$/.test(ROOT) ? ROOT : `${ROOT}/api`;
+
+/** PUBLIC client (no tokens/interceptors) */
 export const apiPublic = axios.create({
-  baseURL: BASE,
+  baseURL: API_BASE,
   withCredentials: false,
   headers: {
     Accept: "application/json",
@@ -23,11 +25,12 @@ export const apiPublic = axios.create({
   },
 });
 
-/**
- * AUTHED client (with token + refresh + 401 redirect)
- */
+/** 🔁 Back-compat alias: some pages import { apiNoAuth } */
+export const apiNoAuth = apiPublic;
+
+/** AUTHED client (token + refresh on 401) */
 export const api = axios.create({
-  baseURL: BASE,
+  baseURL: API_BASE,
   withCredentials: false,
   headers: {
     Accept: "application/json",
@@ -43,8 +46,7 @@ function broadcastLogoutAndRedirect() {
   try {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
-    // notify other tabs
-    localStorage.setItem("auth_event", `logout:${Date.now()}`);
+    localStorage.setItem("auth_event", `logout:${Date.now()}`); // notify other tabs
   } catch {}
   if (typeof window !== "undefined") window.location.assign("/login");
 }
@@ -77,7 +79,7 @@ api.interceptors.response.use(
       try {
         if (!refreshingPromise) {
           refreshingPromise = axios
-            .post(`${BASE}/api/users/token/refresh/`, { refresh }, {
+            .post(`${API_BASE}/users/token/refresh/`, { refresh }, {
               headers: { "Content-Type": "application/json", Accept: "application/json" },
             })
             .then((res) => {

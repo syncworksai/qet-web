@@ -19,7 +19,7 @@ import TraderLab from "./pages/TraderLab.jsx";
 import Backtesting from "./pages/Backtesting.jsx";
 import PsychQuiz from "./pages/PsychQuiz.jsx";
 import Courses from "./pages/Courses.jsx";
-import Pricing from "./pages/Pricing.jsx";
+import PricingMulti from "./pages/PricingMulti.jsx"; // ⬅️ NEW import
 import ThankYou from "./pages/ThankYou.jsx";
 import logo from "./assets/QELOGO.png";
 
@@ -96,14 +96,14 @@ export default function App() {
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        {/* keep old link working too */}
         <Route path="/request-access" element={<RegisterPage />} />
 
         {/* Reset password flow */}
         <Route path="/reset-password" element={<ResetPasswordRequest />} />
         <Route path="/reset-password/:uid/:token" element={<ResetPassword />} />
 
-        <Route path="/pricing" element={<Pricing />} />
+        {/* ⬇️ Use the NEW pricing page */}
+        <Route path="/pricing" element={<PricingMulti />} />
         <Route path="/thank-you" element={<ThankYou />} />
 
         {/* Protected routes */}
