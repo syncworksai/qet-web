@@ -3,8 +3,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/axios";
 
-// Debug marker so you can confirm this component is actually loaded
-console.log("Pricing MULTI loaded");
+// 👇 Single hosted Stripe Payment Link that lets buyers choose add-ons
+const PAYMENT_LINK_ALL =
+  import.meta.env.VITE_STRIPE_PAYMENT_LINK_ALL ||
+  "https://buy.stripe.com/fZu5kDbCG9n1gdrgJl2Nq05";
+
+console.log("Pricing MULTI loaded (one-link mode)");
 
 function Badge({ children }) {
   return (
@@ -21,20 +25,20 @@ function Badge({ children }) {
   );
 }
 
-function Card({ title, price, cadence, features, onPrimary, onSecondary, secondaryLabel = "Buy Now" }) {
+function Card({ title, price, features, onPrimary, onSecondary, secondaryLabel = "Buy Now" }) {
   return (
     <div className="rounded-xl border border-white/10 p-6 bg-[color:var(--card)] text-white flex flex-col">
       <div className="text-xl font-semibold">{title}</div>
       <div className="mt-2 text-4xl font-bold">
-        {price}
-        {price !== "—" && <span className="text-base font-medium text-[color:var(--muted)]">/mo</span>}
+        {price || "—"}
+        {price && <span className="text-base font-medium text-[color:var(--muted)]">/mo</span>}
       </div>
       <ul className="mt-4 space-y-2 text-sm">
         {features?.map((f, i) => <li key={i}>• {f}</li>)}
       </ul>
 
       <div className="mt-6 grid gap-3">
-        {/* Primary: ALWAYS route to /register, not Stripe */}
+        {/* Primary → ALWAYS go to the one Stripe Payment Link */}
         <button
           onClick={onPrimary}
           className="w-full text-center font-semibold py-2 rounded bg-[color:var(--accent)] hover:opacity-90"
@@ -43,7 +47,7 @@ function Card({ title, price, cadence, features, onPrimary, onSecondary, seconda
           Subscribe
         </button>
 
-        {/* Secondary: optional “Buy Now” opens Payment Link */}
+        {/* Secondary: optional “Buy Now” (same link, to reduce confusion) */}
         {onSecondary && (
           <button
             onClick={onSecondary}
@@ -61,18 +65,13 @@ export default function PricingMulti() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState([]);
-  // Default bundle: App + Webinars + Courses (no Coaching)
-  const [selected, setSelected] = useState({ app: true, webinars: true, courses: true, coaching: false });
 
-  // Safety net: if any legacy Stripe <a> sneaks into the DOM, hijack it to /register.
-  useEffect(() => {
-    const handler = (e) => { e.preventDefault(); navigate("/register"); };
-    const anchors = Array.from(document.querySelectorAll('a[href*="stripe.com"]'));
-    anchors.forEach((a) => a.addEventListener("click", handler));
-    return () => anchors.forEach((a) => a.removeEventListener("click", handler));
-  }, [navigate]);
+  const openStripe = () => {
+    // Use replace so buyers don't come "Back" to a half state
+    window.location.replace(PAYMENT_LINK_ALL);
+  };
 
-  // Load product cards (Payment Links + price_ids) from backend
+  // Load product copy (purely for display of names/prices/features)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -93,29 +92,6 @@ export default function PricingMulti() {
     for (const p of pricing) map[p.key] = p;
     return map;
   }, [pricing]);
-
-  const toggle = (k) => setSelected((s) => ({ ...s, [k]: !s[k] }));
-
-  const onBundleCheckout = async () => {
-    const items = Object.keys(selected).filter((k) => selected[k]);
-    if (!items.length) return alert("Pick at least one option.");
-
-    const missing = items.filter((k) => !byKey[k]?.price_id);
-    if (missing.length) {
-      alert(`Missing Stripe Price IDs for: ${missing.join(", ")}. Set PRICE_* env on backend or use individual Buy Now.`);
-      return;
-    }
-
-    try {
-      const r = await api.post("/billing/checkout/bundle/", { items });
-      const url = r.data?.checkout_url;
-      if (url) window.location.href = url;
-      else alert("Could not create checkout. Please try again.");
-    } catch (e) {
-      console.error(e);
-      alert(e?.response?.data?.error || "Checkout error.");
-    }
-  };
 
   if (loading) return <div className="p-8 text-white">Loading pricing…</div>;
 
@@ -143,56 +119,46 @@ export default function PricingMulti() {
             </div>
           </div>
 
-          {/* Product cards from backend */}
+          {/* Product cards */}
           <div className="rounded-xl border border-white/10 p-6 bg-[color:var(--card)]">
             <div className="grid md:grid-cols-2 gap-4">
-              {pricing.map((p) => (
+              {[
+                { k: "app",       label: "QuantumEdge App" },
+                { k: "webinars",  label: "Live Webinars" },
+                { k: "courses",   label: "Courses" },
+                { k: "coaching",  label: "Coaching / Mentorship" },
+              ].map(({ k, label }) => (
                 <Card
-                  key={p.key}
-                  title={p.name}
-                  price={p.price}
-                  cadence={p.cadence}
-                  features={p.features}
-                  onPrimary={() => navigate("/register")} // primary: /register
-                  onSecondary={p.payment_link ? () => window.open(p.payment_link, "_blank", "noopener") : undefined}
-                  secondaryLabel={p.payment_link ? "Buy Now" : undefined}
+                  key={k}
+                  title={byKey[k]?.name || label}
+                  price={(byKey[k]?.price || "").replace(/^\s*$/, "")}
+                  features={byKey[k]?.features}
+                  onPrimary={openStripe}
+                  onSecondary={openStripe}
+                  secondaryLabel="Buy Now"
                 />
               ))}
             </div>
             <div className="mt-4 text-xs text-[color:var(--muted)]">
-              Tip: Use the <b>same email</b> on checkout and registration for smooth access.
+              Tip: You can add/remove Webinars, Courses, and Coaching on the next page before confirming.
             </div>
           </div>
         </div>
 
-        {/* Build-Your-Plan */}
+        {/* Build-Your-Plan (now just funnels to the same Stripe page) */}
         <div className="mt-8 rounded-xl border border-white/10 p-6 bg-[color:var(--card)]">
           <h2 className="text-xl font-semibold">Build your plan</h2>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            Example: App + Webinars + Courses (no Coaching). We’ll bundle them into one checkout.
+            Choose add-ons on the hosted checkout page (Webinars, Courses, Coaching).
           </p>
-
-          <div className="mt-4 grid md:grid-cols-4 gap-3">
-            {["app", "webinars", "courses", "coaching"].map((k) => (
-              <label key={k} className="flex items-center gap-3 p-3 rounded-xl border border-white/10 hover:bg-white/5 cursor-pointer">
-                <input type="checkbox" checked={!!selected[k]} onChange={() => toggle(k)} className="w-5 h-5" />
-                <div>
-                  <div className="font-medium">{byKey[k]?.name || k}</div>
-                  <div className="text-xs text-[color:var(--muted)]">
-                    {byKey[k]?.price_id ? "Bundle-ready" : "Set PRICE_* env"}
-                  </div>
-                </div>
-              </label>
-            ))}
-          </div>
 
           <div className="mt-6">
             <button
-              onClick={onBundleCheckout}
+              onClick={openStripe}
               className="px-5 py-2.5 rounded-xl bg-[color:var(--accent)] hover:opacity-90 font-semibold"
               style={{ color: "#0b0b10" }}
             >
-              Checkout Bundle
+              Go to Checkout
             </button>
           </div>
 
