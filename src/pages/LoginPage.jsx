@@ -1,25 +1,45 @@
 // src/pages/LoginPage.jsx
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { api } from "../api/axios";
+import { apiNoAuth } from "../api/axios";
 import logo from "../assets/QELOGO.png";
+
+/**
+ * Professional landing+login:
+ * - Left: hero, value props, webinar schedule, PTB funded challenges banner, socials row, CTAs
+ * - Right: compact Sign In card
+ *
+ * Webinar data is local for now — update the WEBINARS array below, or later load from API.
+ */
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // --- Simple local webinar schedule (edit freely) ---
+  // To disable, set [] or comment out the <WebinarSchedule/> below.
+  const WEBINARS = useMemo(
+    () => [
+      // { date: "2025-09-28", time: "7:00 PM ET", title: "Market Prep + Q&A (FX/Gold)", level: "Open" },
+      // { date: "2025-10-02", time: "7:00 PM ET", title: "Consistency & Process Deep Dive", level: "Members" },
+    ],
+    []
+  );
+
+  // --- Affiliate banner link ---
+  const PTB_URL =
+    "https://dashboard.plutustradebase.com/challenges?affiliateId=quantumedge.fx";
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      // JWT token endpoint
-      const res = await api.post("/api/users/token/", { username, password });
+      const res = await apiNoAuth.post("/api/users/token/", { username, password });
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
       localStorage.setItem("access", access);
@@ -40,77 +60,299 @@ export default function LoginPage() {
     }
   }
 
-  function handleRequestAccess() {
-    // Go to Register page so users create an account first
-    navigate("/register");
-  }
-
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-[color:var(--card)] border border-white/10 rounded-xl p-6">
-        <div className="flex flex-col items-center mb-6">
-          <img src={logo} alt="QE" className="h-10 mb-2" />
-          <h1 className="text-xl font-semibold">Sign in</h1>
-        </div>
+    <div className="min-h-screen px-4 md:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-7">
+        {/* LEFT: Hero / value / webinars / PTB / socials / CTAs */}
+        <section className="space-y-6">
+          {/* Hero */}
+          <div className="rounded-2xl p-6 md:p-7 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+            <div className="flex items-center gap-3 mb-3">
+              <img src={logo} alt="QuantumEdge" className="h-9" />
+              <h1 className="text-2xl md:text-3xl font-semibold text-neutral-100">
+                Trade with a system. <span className="text-cyan-300">Improve with data.</span>
+              </h1>
+            </div>
+            <p className="text-sm md:text-base text-neutral-400 leading-relaxed">
+              QuantumEdge brings together <span className="text-neutral-200">TraderLab</span>, journaling, P&amp;L analytics,
+              psych profile, watchlists, charts, and the FX calendar—designed to help you repeat what works.
+            </p>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div>
-            <label className="block text-xs text-[color:var(--muted)] mb-1">
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
-              autoComplete="username"
-              required
-            />
+            {/* Value props */}
+            <div className="grid sm:grid-cols-2 gap-3 mt-5">
+              <ValueCard title="TraderLab">
+                Backtests, attachments, R-multiples, expectancy, hour-of-day win%.
+              </ValueCard>
+              <ValueCard title="Psych Profile">
+                Archetype quiz + guided prompts to reduce impulsive errors.
+              </ValueCard>
+              <ValueCard title="Webinars">
+                Weekly topics &amp; Q&amp;A with recordings when available.
+              </ValueCard>
+              <ValueCard title="Courses">
+                Self-paced strategy and psychology drills for consistency.
+              </ValueCard>
+            </div>
+
+            {/* Primary CTAs */}
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              <Link
+                to="/register"
+                className="px-4 py-2 rounded-xl font-semibold bg-[color:var(--accent)] hover:opacity-90"
+                style={{ color: "#0B0F16" }}
+              >
+                Create your account
+              </Link>
+              <Link
+                to="/pricing"
+                className="px-4 py-2 rounded-xl border border-white/10 text-neutral-200 hover:bg-white/5"
+              >
+                View pricing
+              </Link>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-[color:var(--muted)] mb-1">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded px-3 py-2 bg-background border border-white/10 focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]"
-              autoComplete="current-password"
-              required
-            />
-          </div>
+          {/* Webinar Schedule (optional) */}
+          <WebinarSchedule items={WEBINARS} />
 
-          {error && <div className="text-red-400 text-sm">{error}</div>}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full bg-[color:var(--accent)] text-black font-semibold py-2 rounded hover:opacity-90 disabled:opacity-60"
+          {/* PTB funded challenges banner */}
+          <a
+            href={PTB_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-2xl p-5 border border-cyan-500/30 hover:border-cyan-400/60 bg-[color:var(--card,#0A0F16)] transition-colors"
+            title="Funded challenges"
           >
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-sm uppercase tracking-wide text-cyan-300">
+                  Funded challenges
+                </div>
+                <div className="text-lg md:text-xl font-semibold text-neutral-100">
+                  Trade someone else’s capital with PTB
+                </div>
+                <p className="text-sm text-neutral-400 mt-1">
+                  Choose a challenge, then use QuantumEdge to track process, consistency, and your % to payout.
+                </p>
+                <p className="text-xs text-neutral-500 mt-2">
+                  Disclosure: Affiliate link. We may earn a commission at no extra cost to you.
+                </p>
+              </div>
+              <div className="shrink-0">
+                <span className="inline-flex items-center px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
+                  Explore PTB →
+                </span>
+              </div>
+            </div>
+          </a>
 
-        <div className="mt-4 text-center text-sm text-[color:var(--muted)] space-y-2">
-          <div>
-            <Link to="/reset-password" className="underline">
-              Forgot password?
-            </Link>
+          {/* Socials row (aligned, consistent) */}
+          <SocialRow />
+        </section>
+
+        {/* RIGHT: Sign In */}
+        <aside className="lg:pl-2">
+          <div className="w-full max-w-md ml-auto rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+            <div className="mb-5">
+              <div className="text-sm text-neutral-400">Welcome back</div>
+              <h2 className="text-xl font-semibold text-neutral-100">Sign in</h2>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <FormField
+                label="Username"
+                autoComplete="username"
+                value={username}
+                onChange={setUsername}
+              />
+              <FormField
+                label="Password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={setPassword}
+              />
+
+              {error && (
+                <div className="text-red-400 text-sm rounded border border-red-400/30 bg-red-400/10 px-3 py-2">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full bg-[color:var(--accent)] text-black font-semibold py-2 rounded-lg hover:opacity-90 disabled:opacity-60"
+              >
+                {busy ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+
+            <div className="mt-4 text-sm text-neutral-400 space-y-2">
+              <div>
+                <Link to="/reset-password" className="underline">
+                  Forgot password?
+                </Link>
+              </div>
+              <div>
+                New here?{" "}
+                <Link to="/register" className="underline text-cyan-300">
+                  Create your account
+                </Link>
+              </div>
+              <div className="text-xs text-neutral-500">
+                Tip: Use the <b>same email</b> on checkout and registration for smooth access.
+              </div>
+            </div>
           </div>
-          <div>
-            Need an account?{" "}
-            <button
-              type="button"
-              onClick={handleRequestAccess}
-              className="underline text-[color:var(--accent)]"
-            >
-              Request access
-            </button>
-          </div>
-        </div>
+        </aside>
       </div>
     </div>
+  );
+}
+
+/* ----------------- Sub-components ----------------- */
+
+function ValueCard({ title, children }) {
+  return (
+    <div className="rounded-xl p-3 border border-white/10 bg-black/20">
+      <div className="text-sm font-medium text-neutral-100">{title}</div>
+      <p className="text-xs text-neutral-400 mt-1">{children}</p>
+    </div>
+  );
+}
+
+function WebinarSchedule({ items }) {
+  // If empty, show a friendly placeholder
+  const empty = !items || items.length === 0;
+  return (
+    <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-sm uppercase tracking-wide text-neutral-400">
+            Webinar Schedule
+          </div>
+          <div className="text-lg font-semibold text-neutral-100">What’s coming up</div>
+        </div>
+        <Link
+          to="/pricing"
+          className="text-sm px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
+          title="See plans"
+        >
+          See plans
+        </Link>
+      </div>
+
+      {empty ? (
+        <div className="text-sm text-neutral-400">
+          We’ll post dates here. Topics include market prep, consistency playbooks, and strategy drills.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((w, i) => (
+            <li
+              key={`${w.date}-${i}`}
+              className="flex items-center justify-between rounded-lg px-3 py-2 border border-white/10"
+            >
+              <div className="text-sm">
+                <div className="text-neutral-100 font-medium">{w.title}</div>
+                <div className="text-neutral-400">
+                  {new Date(`${w.date}T00:00:00`).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}{" "}
+                  • {w.time} {w.level ? `• ${w.level}` : ""}
+                </div>
+              </div>
+              <span className="text-xs px-2 py-1 rounded border border-white/10 text-neutral-300">
+                Live
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SocialRow() {
+  const socials = [
+    { href: "http://www.youtube.com/@quantum.edge.fx1", label: "YouTube", icon: YouTubeIcon },
+    { href: "https://www.instagram.com/quantumedge.fx/", label: "Instagram", icon: InstagramIcon },
+    { href: "http://tiktok.com/@quantum.edge.fx", label: "TikTok", icon: TikTokIcon },
+    { href: "https://www.facebook.com/profile.php?id=61579183787818", label: "Facebook", icon: FacebookIcon },
+  ];
+
+  return (
+    <div className="rounded-2xl p-4 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+      <div className="text-sm text-neutral-400 mb-3">Follow along</div>
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-3">
+        {socials.map(({ href, label, icon: Icon }) => (
+          <a
+            key={label}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:bg-white/5"
+            title={label}
+          >
+            <Icon />
+            <span className="text-sm text-neutral-200">{label}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, value, onChange, type = "text", autoComplete }) {
+  return (
+    <div>
+      <label className="block text-xs text-[color:var(--muted)] mb-1">{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        className="w-full rounded-lg px-3 py-2 bg-background border border-white/10 focus:outline-none focus:border-white/20"
+        required
+      />
+    </div>
+  );
+}
+
+/* --------- Minimal inline icons (keeps bundle small, no deps) --------- */
+function YouTubeIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+      <rect x="2" y="6" width="20" height="12" rx="3" stroke="#22d3ee" strokeWidth="1.5" />
+      <path d="M10 9.5v5l5-2.5-5-2.5z" fill="#22d3ee" />
+    </svg>
+  );
+}
+function InstagramIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+      <rect x="4" y="4" width="16" height="16" rx="4" stroke="#22d3ee" strokeWidth="1.5" />
+      <circle cx="12" cy="12" r="3.5" stroke="#22d3ee" strokeWidth="1.5" />
+      <circle cx="17.5" cy="6.5" r="1" fill="#22d3ee" />
+    </svg>
+  );
+}
+function TikTokIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+      <path d="M14 4c.3 2.3 1.6 4 4 4" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
+      <path d="M14 9v6.5a4.5 4.5 0 1 1-3-4.24" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function FacebookIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+      <path d="M13 10h3V7h-3c-1.7 0-3 1.3-3 3v7h3v-4h2.5l.5-3H13v-1c0-.6.4-1 1-1z" fill="#22d3ee" />
+      <rect x="3" y="3" width="18" height="18" rx="4" stroke="#22d3ee" strokeWidth="1.5" />
+    </svg>
   );
 }

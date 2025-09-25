@@ -3,17 +3,20 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/axios";
 
-// 👇 Single hosted Stripe Payment Link that lets buyers choose add-ons
-const PAYMENT_LINK_ALL =
-  import.meta.env.VITE_STRIPE_PAYMENT_LINK_ALL ||
-  "https://buy.stripe.com/fZu5kDbCG9n1gdrgJl2Nq05";
+console.log("Pricing MULTI loaded (register-first flow, compact)");
 
-console.log("Pricing MULTI loaded (one-link mode)");
+// Fallback prices so we always render numbers
+const FALLBACK = {
+  app:      { price: "$10.00",  cadence: "mo" },
+  webinars: { price: "$100.00", cadence: "mo" },
+  courses:  { price: "$20.00",  cadence: "mo" },
+  coaching: { price: "$100.00", cadence: "mo" },
+};
 
 function Badge({ children }) {
   return (
     <span
-      className="text-xs px-2 py-1 rounded-lg border"
+      className="text-[11px] px-2 py-0.5 rounded-lg border"
       style={{
         borderColor: "rgba(255,255,255,0.10)",
         background: "rgba(255,255,255,0.04)",
@@ -25,38 +28,51 @@ function Badge({ children }) {
   );
 }
 
-function Card({ title, price, features, onPrimary, onSecondary, secondaryLabel = "Buy Now" }) {
-  return (
-    <div className="rounded-xl border border-white/10 p-6 bg-[color:var(--card)] text-white flex flex-col">
-      <div className="text-xl font-semibold">{title}</div>
-      <div className="mt-2 text-4xl font-bold">
-        {price || "—"}
-        {price && <span className="text-base font-medium text-[color:var(--muted)]">/mo</span>}
+function Price({ value, cadence = "mo" }) {
+  const s = String(value ?? "").trim();
+  if (!s) {
+    return (
+      <div className="mt-1 text-xl font-semibold">
+        —<span className="text-xs font-medium text-[color:var(--muted)]">/ {cadence}</span>
       </div>
-      <ul className="mt-4 space-y-2 text-sm">
+    );
+  }
+  const m = s.match(/^(\$)?\s*([0-9]+(?:\.[0-9]{2})?)$/);
+  if (!m) {
+    return (
+      <div className="mt-1 text-xl font-semibold">
+        {s}<span className="text-xs font-medium text-[color:var(--muted)]">/ {cadence}</span>
+      </div>
+    );
+  }
+  const [, sym = "$", amt = "0.00"] = m;
+  return (
+    <div className="mt-1 flex items-end gap-1">
+      <span className="text-sm opacity-80">{sym}</span>
+      <span className="text-3xl font-extrabold leading-none tracking-tight">
+        {amt.replace(/\.00$/, "")}
+      </span>
+      <span className="text-xs font-medium text-[color:var(--muted)]">/ {cadence}</span>
+    </div>
+  );
+}
+
+function Card({ title, price, cadence, features, onPrimary, note }) {
+  return (
+    <div className="rounded-lg border border-white/10 p-4 bg-[color:var(--card)] text-white flex flex-col">
+      <div className="text-[15px] font-semibold">{title}</div>
+      <Price value={price} cadence={cadence} />
+      <ul className="mt-2 space-y-1.5 text-[13px] leading-relaxed">
         {features?.map((f, i) => <li key={i}>• {f}</li>)}
       </ul>
-
-      <div className="mt-6 grid gap-3">
-        {/* Primary → ALWAYS go to the one Stripe Payment Link */}
-        <button
-          onClick={onPrimary}
-          className="w-full text-center font-semibold py-2 rounded bg-[color:var(--accent)] hover:opacity-90"
-          style={{ color: "#0b0b10" }}
-        >
-          Subscribe
-        </button>
-
-        {/* Secondary: optional “Buy Now” (same link, to reduce confusion) */}
-        {onSecondary && (
-          <button
-            onClick={onSecondary}
-            className="w-full text-center border border-white/10 text-neutral-200 rounded py-2 hover:bg-neutral-800"
-          >
-            {secondaryLabel}
-          </button>
-        )}
-      </div>
+      {note && <div className="text-[11px] text-[color:var(--muted)] mt-2">{note}</div>}
+      <button
+        onClick={onPrimary}
+        className="mt-3 w-full text-center font-semibold py-1.5 rounded bg-[color:var(--accent)] hover:opacity-90 text-[14px]"
+        style={{ color: "#0b0b10" }}
+      >
+        Register to Subscribe
+      </button>
     </div>
   );
 }
@@ -66,12 +82,8 @@ export default function PricingMulti() {
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState([]);
 
-  const openStripe = () => {
-    // Use replace so buyers don't come "Back" to a half state
-    window.location.replace(PAYMENT_LINK_ALL);
-  };
+  const goRegister = () => navigate("/register");
 
-  // Load product copy (purely for display of names/prices/features)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -95,82 +107,78 @@ export default function PricingMulti() {
 
   if (loading) return <div className="p-8 text-white">Loading pricing…</div>;
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl text-white">
-        {/* Header/value props */}
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="rounded-xl border border-white/10 p-6 bg-[color:var(--card)]">
-            <h1 className="text-2xl font-semibold mb-2">Quantum Edge</h1>
-            <p className="text-sm text-[color:var(--muted)]">
-              Journal, analytics, psych profile, TraderLab & more—built for serious traders.
-            </p>
-            <ul className="mt-4 space-y-2 text-sm">
-              <li>• Trade journaling with photo/file attachments</li>
-              <li>• P&amp;L analytics, R-multiples, hour-of-day stats</li>
-              <li>• Psych Quiz archetype + guidance</li>
-              <li>• Watchlist, charts, news &amp; FX calendar</li>
-              <li>• Webinars & Courses (optional add-ons)</li>
-            </ul>
-            <div className="mt-6 flex items-center gap-3">
-              <Badge>Cancel anytime</Badge>
-              <Badge>Secure checkout</Badge>
-              <Badge>Instant access</Badge>
-            </div>
-          </div>
+  const priceFor = (k) => (byKey[k]?.price && byKey[k].price !== "—") ? byKey[k].price : FALLBACK[k].price;
+  const cadenceFor = (k) => byKey[k]?.cadence || FALLBACK[k].cadence;
 
-          {/* Product cards */}
-          <div className="rounded-xl border border-white/10 p-6 bg-[color:var(--card)]">
-            <div className="grid md:grid-cols-2 gap-4">
-              {[
-                { k: "app",       label: "QuantumEdge App" },
-                { k: "webinars",  label: "Live Webinars" },
-                { k: "courses",   label: "Courses" },
-                { k: "coaching",  label: "Coaching / Mentorship" },
-              ].map(({ k, label }) => (
-                <Card
-                  key={k}
-                  title={byKey[k]?.name || label}
-                  price={(byKey[k]?.price || "").replace(/^\s*$/, "")}
-                  features={byKey[k]?.features}
-                  onPrimary={openStripe}
-                  onSecondary={openStripe}
-                  secondaryLabel="Buy Now"
-                />
-              ))}
-            </div>
-            <div className="mt-4 text-xs text-[color:var(--muted)]">
-              Tip: You can add/remove Webinars, Courses, and Coaching on the next page before confirming.
-            </div>
+  return (
+    <div className="min-h-screen flex items-center justify-center p-5">
+      <div className="w-full max-w-6xl text-white">
+        {/* Header */}
+        <div className="rounded-lg border border-white/10 p-5 bg-[color:var(--card)]">
+          <h1 className="text-[22px] md:text-[26px] font-semibold mb-1">Quantum Edge</h1>
+          <p className="text-sm text-[color:var(--muted)]">
+            Journal, analytics, psych profile, TraderLab &amp; more—built for serious traders.
+          </p>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <Badge>Cancel anytime</Badge>
+            <Badge>Secure checkout</Badge>
+            <Badge>Instant access</Badge>
+          </div>
+          <div className="mt-3 text-[12px] text-yellow-300/90">
+            <strong>Note:</strong> The <b>QuantumEdge App ($10/mo)</b> is required and works hand-in-hand with Webinars, Courses, and Coaching.
+            Create your account first, then complete payment.
           </div>
         </div>
 
-        {/* Build-Your-Plan (now just funnels to the same Stripe page) */}
-        <div className="mt-8 rounded-xl border border-white/10 p-6 bg-[color:var(--card)]">
-          <h2 className="text-xl font-semibold">Build your plan</h2>
+        {/* Cards (more compact) */}
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card
+            title={byKey.app?.name || "QuantumEdge App"}
+            price={priceFor("app")}
+            cadence={cadenceFor("app")}
+            features={byKey.app?.features || ["TraderLab & Journal","Backtesting + Analytics","Alerts, Watchlist, Intel"]}
+            onPrimary={goRegister}
+            note="Required"
+          />
+          <Card
+            title={byKey.webinars?.name || "Live Webinars"}
+            price={priceFor("webinars")}
+            cadence={cadenceFor("webinars")}
+            features={byKey.webinars?.features || ["Live sessions + Q&A","Replays when available","Session notes/links"]}
+            onPrimary={goRegister}
+          />
+          <Card
+            title={byKey.courses?.name || "Courses"}
+            price={priceFor("courses")}
+            cadence={cadenceFor("courses")}
+            features={byKey.courses?.features || ["Self-paced lessons","Strategy + psychology drills","Journaling workflows"]}
+            onPrimary={goRegister}
+          />
+          <Card
+            title={byKey.coaching?.name || "Coaching / Mentorship"}
+            price={priceFor("coaching")}
+            cadence={cadenceFor("coaching")}
+            features={byKey.coaching?.features || ["1:1 or small group","Personalized feedback","Accountability plan"]}
+            onPrimary={goRegister}
+          />
+        </div>
+
+        {/* Register-first CTA */}
+        <div className="mt-5 rounded-lg border border-white/10 p-5 bg-[color:var(--card)]">
+          <h2 className="text-[18px] font-semibold">Ready to get started?</h2>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            Choose add-ons on the hosted checkout page (Webinars, Courses, Coaching).
+            First, <b>create your account</b>. After registration, you’ll be guided to select your subscription and complete payment.
+            The App is required; add Webinars, Courses, or Coaching during checkout.
           </p>
-
-          <div className="mt-6">
-            <button
-              onClick={openStripe}
-              className="px-5 py-2.5 rounded-xl bg-[color:var(--accent)] hover:opacity-90 font-semibold"
-              style={{ color: "#0b0b10" }}
-            >
-              Go to Checkout
-            </button>
-          </div>
-
-          <div className="mt-4 text-xs text-[color:var(--muted)]">
-            <p>
-              Disclosures: Webinars/Courses are educational only; not investment advice. Trading involves risk; past
-              performance does not guarantee future results. Features and availability may change.
-            </p>
-            <p className="mt-2">
-              Subscriptions auto-renew monthly; cancel anytime. Cancellations take effect at the end of the current
-              billing period. No refunds.
-            </p>
+          <button
+            onClick={goRegister}
+            className="mt-3 px-5 py-2.5 rounded-xl bg-[color:var(--accent)] hover:opacity-90 font-semibold"
+            style={{ color: "#0b0b10" }}
+          >
+            Register & Continue
+          </button>
+          <div className="mt-3 text-[11px] text-[color:var(--muted)]">
+            Use the <b>same email</b> on registration and checkout for smooth access. Subscriptions auto-renew monthly; cancel anytime.
           </div>
         </div>
       </div>
