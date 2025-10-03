@@ -2,18 +2,21 @@
 import axios from "axios";
 
 /**
- * Accept either:
- *  - VITE_API_BASE       = https://host.tld/api
- *  - VITE_API_BASE_URL   = https://host.tld   (no /api)
- * Normalize to ".../api".
+ * Base host ONLY (no /api here).
+ * We’ll prepend /api per request so the final URLs look like:
+ * https://quantum-edge-fx.onrender.com/api/...
  */
-const RAW =
-  import.meta.env.VITE_API_BASE ||
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000";
+export const API_BASE = "https://quantum-edge-fx.onrender.com";
 
-const ROOT = RAW.replace(/\/+$/, "");           // strip trailing slashes
-export const API_BASE = /\/api$/.test(ROOT) ? ROOT : `${ROOT}/api`;
+/** Ensure leading AND trailing slash (DRF expects trailing /) */
+const norm = (p) => {
+  let s = p.startsWith("/") ? p : `/${p}`;
+  if (!s.endsWith("/")) s += "/";
+  return s;
+};
+
+/** Build a full API path like "/api/users/register/" */
+export const apiPath = (p) => `/api${norm(p)}`;
 
 /** PUBLIC client (no tokens/interceptors) */
 export const apiPublic = axios.create({
@@ -25,7 +28,7 @@ export const apiPublic = axios.create({
   },
 });
 
-/** 🔁 Back-compat alias: some pages import { apiNoAuth } */
+/** Back-compat alias used in your code */
 export const apiNoAuth = apiPublic;
 
 /** AUTHED client (token + refresh on 401) */
@@ -38,7 +41,8 @@ export const api = axios.create({
   },
 });
 
-// ----- helpers -----
+/* ---------------- Auth refresh helpers ---------------- */
+
 const AUTH_SKIP_REGEX =
   /\/api\/users\/(token(?:\/refresh)?|register|password|reset|verify|activate)\/?$/i;
 
@@ -46,15 +50,17 @@ function broadcastLogoutAndRedirect() {
   try {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
-    localStorage.setItem("auth_event", `logout:${Date.now()}`); // notify other tabs
+    localStorage.setItem("auth_event", `logout:${Date.now()}`);
   } catch {}
   if (typeof window !== "undefined") window.location.assign("/login");
 }
 
-// attach access token, if present
+// Attach access token for authed client
 api.interceptors.request.use((config) => {
-  const access = localStorage.getItem("access");
-  if (access) config.headers.Authorization = `Bearer ${access}`;
+  try {
+    const access = localStorage.getItem("access");
+    if (access) config.headers.Authorization = `Bearer ${access}`;
+  } catch {}
   return config;
 });
 
@@ -68,9 +74,19 @@ api.interceptors.response.use(
 
     const status = response.status;
 
-    // Only try refresh for non-auth endpoints
-    if (status === 401 && !config.__isRetry && !AUTH_SKIP_REGEX.test(config.url || "")) {
-      const refresh = localStorage.getItem("refresh");
+    if (
+      status === 401 &&
+      !config.__isRetry &&
+      !AUTH_SKIP_REGEX.test(config.url || "")
+    ) {
+      const refresh = (() => {
+        try {
+          return localStorage.getItem("refresh");
+        } catch {
+          return null;
+        }
+      })();
+
       if (!refresh) {
         broadcastLogoutAndRedirect();
         throw error;
@@ -79,23 +95,37 @@ api.interceptors.response.use(
       try {
         if (!refreshingPromise) {
           refreshingPromise = axios
-            .post(`${API_BASE}/users/token/refresh/`, { refresh }, {
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-            })
+            .post(
+              `${API_BASE}${apiPath("users/token/refresh/")}`,
+              { refresh },
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+              }
+            )
             .then((res) => {
               const newAccess = res.data?.access;
               if (!newAccess) throw new Error("No access token in refresh response");
-              localStorage.setItem("access", newAccess);
+              try {
+                localStorage.setItem("access", newAccess);
+              } catch {}
               return newAccess;
             })
             .finally(() => {
-              setTimeout(() => { refreshingPromise = null; }, 0);
+              setTimeout(() => {
+                refreshingPromise = null;
+              }, 0);
             });
         }
 
         const newAccess = await refreshingPromise;
         config.__isRetry = true;
-        config.headers = { ...(config.headers || {}), Authorization: `Bearer ${newAccess}` };
+        config.headers = {
+          ...(config.headers || {}),
+          Authorization: `Bearer ${newAccess}`,
+        };
         return api.request(config);
       } catch (e) {
         broadcastLogoutAndRedirect();
@@ -107,4 +137,16 @@ api.interceptors.response.use(
   }
 );
 
-export default api;
+/* ---------------- Temporary debug (remove later) ---------------- */
+
+if (typeof window !== "undefined") {
+  console.log("[QE] API_BASE =", API_BASE);
+}
+apiPublic.interceptors.request.use((c) => {
+  console.log("[QE] PUBLIC →", c.method?.toUpperCase(), c.baseURL + (c.url || ""));
+  return c;
+});
+api.interceptors.request.use((c) => {
+  console.log("[QE] AUTH   →", c.method?.toUpperCase(), c.baseURL + (c.url || ""));
+  return c;
+});

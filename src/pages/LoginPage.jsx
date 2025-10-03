@@ -1,7 +1,7 @@
 // src/pages/LoginPage.jsx
 import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { apiNoAuth } from "../api/axios";
+import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
 /**
@@ -21,11 +21,10 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   // --- Simple local webinar schedule (edit freely) ---
-  // To disable, set [] or comment out the <WebinarSchedule/> below.
   const WEBINARS = useMemo(
     () => [
-      // { date: "2025-09-28", time: "7:00 PM ET", title: "Market Prep + Q&A (FX/Gold)", level: "Open" },
-      // { date: "2025-10-02", time: "7:00 PM ET", title: "Consistency & Process Deep Dive", level: "Members" },
+      // { date: "2025-10-10", time: "7:00 PM ET", title: "Market Prep + Q&A (FX/Gold)", level: "Open" },
+      // { date: "2025-10-17", time: "7:00 PM ET", title: "Consistency & Process Deep Dive", level: "Members" },
     ],
     []
   );
@@ -39,7 +38,8 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
-      const res = await apiNoAuth.post("/api/users/token/", { username, password });
+      // ✅ build /api/users/token/
+      const res = await apiNoAuth.post(apiPath("users/token/"), { username, password });
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
       localStorage.setItem("access", access);
@@ -49,7 +49,7 @@ export default function LoginPage() {
     } catch (err) {
       console.error("login failed", err);
       if (err.response?.status === 404) {
-        setError("API not found. Check VITE_API_BASE_URL and backend routes.");
+        setError("API not found. Check API base URL and backend routes.");
       } else if (err.response?.status === 401) {
         setError("Invalid username or password.");
       } else {
@@ -223,7 +223,6 @@ function ValueCard({ title, children }) {
 }
 
 function WebinarSchedule({ items }) {
-  // If empty, show a friendly placeholder
   const empty = !items || items.length === 0;
   return (
     <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
@@ -322,7 +321,7 @@ function FormField({ label, value, onChange, type = "text", autoComplete }) {
   );
 }
 
-/* --------- Minimal inline icons (keeps bundle small, no deps) --------- */
+/* --------- Minimal inline icons --------- */
 function YouTubeIcon({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">

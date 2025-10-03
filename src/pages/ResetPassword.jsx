@@ -1,10 +1,10 @@
 // src/pages/ResetPassword.jsx
 import React, { useState } from "react";
 import { Link, useParams, Navigate } from "react-router-dom";
-import { api } from "../api/axios";
+import { api, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
-const CONFIRM_ENDPOINT = "/api/users/password/reset/confirm/";
+const CONFIRM_ENDPOINT = apiPath("users/password/reset/confirm/");
 
 export default function ResetPassword() {
   const { uid, token } = useParams();
