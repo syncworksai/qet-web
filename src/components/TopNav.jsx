@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { PAYLINKS, STRIPE_ALL_LINK, SOCIAL } from "../config/commerce";
 import logo from "../assets/QELOGO.png";
+import { useSubscription } from "../context/SubscriptionContext";
 
 function NavA({ to, children }) {
   return (
@@ -22,12 +23,7 @@ function NavA({ to, children }) {
 }
 
 const Icon = ({ d, label }) => (
-  <svg
-    aria-label={label}
-    viewBox="0 0 24 24"
-    className="h-5 w-5"
-    fill="currentColor"
-  >
+  <svg aria-label={label} viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
     <path d={d} />
   </svg>
 );
@@ -41,9 +37,8 @@ const icons = {
 
 export default function TopNav() {
   const navigate = useNavigate();
-  const [isAuthed, setIsAuthed] = useState(
-    !!localStorage.getItem("access")
-  );
+  const [isAuthed, setIsAuthed] = useState(!!localStorage.getItem("access"));
+  const { isActive, isAuthed: ctxAuthed } = useSubscription();
 
   useEffect(() => {
     const onStorage = () => setIsAuthed(!!localStorage.getItem("access"));
@@ -51,12 +46,23 @@ export default function TopNav() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  useEffect(() => {
+    if (ctxAuthed !== undefined) setIsAuthed(Boolean(ctxAuthed));
+  }, [ctxAuthed]);
+
   const logout = () => {
     localStorage.removeItem("access");
     localStorage.removeItem("refresh");
     setIsAuthed(false);
     navigate("/login");
   };
+
+  const LockBadge = () =>
+    ctxAuthed && !isActive ? (
+      <span className="ml-1 text-[10px] px-2 py-0.5 rounded-full border border-gray-700 text-gray-300">
+        LOCK
+      </span>
+    ) : null;
 
   return (
     <div className="sticky top-0 z-40 backdrop-blur bg-black/50 border-b border-white/10">
@@ -72,10 +78,19 @@ export default function TopNav() {
           {isAuthed ? (
             <>
               <NavA to="/">Dashboard</NavA>
+              <NavA to="/trade">
+                <span className="inline-flex items-center">
+                  Trade Desk <LockBadge />
+                </span>
+              </NavA>
               <NavA to="/traderlab">TraderLab</NavA>
               <NavA to="/backtesting">Backtesting</NavA>
               <NavA to="/psych-quiz">Psych&nbsp;Quiz</NavA>
-              <NavA to="/courses">Courses</NavA>
+              <NavA to="/courses">
+                <span className="inline-flex items-center">
+                  Courses <LockBadge />
+                </span>
+              </NavA>
             </>
           ) : (
             <>
@@ -83,7 +98,7 @@ export default function TopNav() {
             </>
           )}
 
-          {/* Products dropdown (always visible) */}
+          {/* Products dropdown */}
           <div className="relative group">
             <button className="px-3 py-2 rounded-xl text-sm text-neutral-300 hover:text-white border border-transparent hover:border-white/10">
               Products ▾
@@ -98,44 +113,21 @@ export default function TopNav() {
                 App + Add-ons (All-in-One)
               </a>
               <div className="h-px my-1 bg-white/10" />
-              <a
-                className="block px-3 py-2 rounded hover:bg-white/5"
-                href={PAYLINKS.webinars}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a className="block px-3 py-2 rounded hover:bg:white/5" href={PAYLINKS.webinars} target="_blank" rel="noreferrer">
                 Live Webinars
               </a>
-              <a
-                className="block px-3 py-2 rounded hover:bg-white/5"
-                href={PAYLINKS.courses}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.courses} target="_blank" rel="noreferrer">
                 Courses
               </a>
-              <a
-                className="block px-3 py-2 rounded hover:bg-white/5"
-                href={PAYLINKS.coaching}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.coaching} target="_blank" rel="noreferrer">
                 Coaching / Mentorship
               </a>
               {PAYLINKS.app && (
-                <a
-                  className="block px-3 py-2 rounded hover:bg-white/5"
-                  href={PAYLINKS.app}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.app} target="_blank" rel="noreferrer">
                   QE App (standalone)
                 </a>
               )}
-              <NavLink
-                to="/pricing"
-                className="block px-3 py-2 rounded hover:bg-white/5 mt-1"
-              >
+              <NavLink to="/pricing" className="block px-3 py-2 rounded hover:bg-white/5 mt-1">
                 Pricing page
               </NavLink>
             </div>
@@ -145,44 +137,12 @@ export default function TopNav() {
         {/* Right side */}
         <div className="ml-auto flex items-center gap-3">
           {/* Socials */}
-          <a
-            href={SOCIAL.youtube}
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-            title="YouTube"
-          >
-            <Icon d={icons.yt} label="YouTube" />
-          </a>
-          <a
-            href={SOCIAL.instagram}
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-            title="Instagram"
-          >
-            <Icon d={icons.ig} label="Instagram" />
-          </a>
-          <a
-            href={SOCIAL.facebook}
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-            title="Facebook"
-          >
-            <Icon d={icons.fb} label="Facebook" />
-          </a>
-          <a
-            href={SOCIAL.tiktok}
-            target="_blank"
-            rel="noreferrer"
-            className="text-neutral-300 hover:text-white"
-            title="TikTok"
-          >
-            <Icon d={icons.tt} label="TikTok" />
-          </a>
+          <a href={SOCIAL.youtube}   target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="YouTube"><Icon d={icons.yt} label="YouTube" /></a>
+          <a href={SOCIAL.instagram} target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Instagram"><Icon d={icons.ig} label="Instagram" /></a>
+          <a href={SOCIAL.facebook}  target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Facebook"><Icon d={icons.fb} label="Facebook" /></a>
+          <a href={SOCIAL.tiktok}    target="_blank" rel="noreferrer" className="text-neutral-300 hover:text:white" title="TikTok"><Icon d={icons.tt} label="TikTok" /></a>
 
-          {/* Auth buttons */}
+          {/* Auth */}
           {isAuthed ? (
             <button
               onClick={logout}

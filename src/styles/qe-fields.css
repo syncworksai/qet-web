@@ -1,0 +1,63 @@
+/* Dark UI defaults for form fields across the app */
+:root {
+  --qe-bg: #0b1220;         /* field background */
+  --qe-fg: #e5edf7;         /* text */
+  --qe-bd: #263245;         /* border */
+  --qe-bd-focus: #4f46e5;   /* focus / brand */
+  --qe-muted: #93a6bf;
+}
+
+/* base text fields */
+.qe-field {
+  background-color: var(--qe-bg);
+  color: var(--qe-fg);
+  border: 1px solid var(--qe-bd);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.25rem;
+  width: 100%;
+}
+.qe-field::placeholder {
+  color: color-mix(in srgb, var(--qe-fg) 55%, transparent);
+}
+.qe-field:focus {
+  outline: none;
+  border-color: var(--qe-bd-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--qe-bd-focus) 25%, transparent);
+}
+
+/* select styling, including custom arrow (so it isn't white) */
+.qe-select {
+  appearance: none;
+  background-color: var(--qe-bg);
+  color: var(--qe-fg);
+  border: 1px solid var(--qe-bd);
+  border-radius: 0.75rem;
+  padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+  width: 100%;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 20 20' fill='%23e5edf7'><path d='M5.25 7.5L10 12.25L14.75 7.5'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 1rem;
+}
+.qe-select:focus {
+  outline: none;
+  border-color: var(--qe-bd-focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--qe-bd-focus) 25%, transparent);
+}
+
+/* disabled look */
+.qe-field:disabled,
+.qe-select:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+/* Recharts / tooltip surfaces should not be white */
+.qe-tooltip {
+  background: #0f1729 !important;
+  color: var(--qe-fg) !important;
+  border: 1px solid var(--qe-bd) !important;
+  border-radius: 0.75rem !important;
+}

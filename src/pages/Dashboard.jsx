@@ -1,362 +1,317 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api/axios";
 
 import MarketClocks from "../components/MarketClocks";
-import KPICard from "../components/KPICard";
-import Watchlist from "../components/watchlist";
-import ChartCard from "../components/chartcard";
+import Watchlist from "../components/Watchlist";
+import LiteChart from "../components/LiteChart";
 import NewsFeed from "../components/NewsFeed";
 import ForexCalendar from "../components/ForexCalendar";
 import AlertCenter from "../components/AlertCenter";
 
-import {
-  PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from "recharts";
-
-/* ---------------- color tokens ---------------- */
-function readCssVar(name) {
-  if (typeof window === "undefined") return "";
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+/* ===================== THEME / TOKENS ===================== */
+function cssVar(name, fb = "") {
+  if (typeof window === "undefined") return fb;
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fb;
 }
-function fallbackTokens() {
-  return {
-    primary: "#4f46e5",
-    secondary: "#7c3aed",
-    accent: "#06b6d4",
-    success: "#10b981",
-    danger: "#ef4444",
-    warning: "#f59e0b",
-    info: "#0ea5e9",
-    muted: "#94a3b8",
-    grid: "#1f2937",
-    charts: ["#4f46e5","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316","#14b8a6"],
-  };
-}
-function hexToRgba(hex, alpha = 1) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-function useColorTokens() {
-  const [tokens, setTokens] = useState(fallbackTokens());
+const TOKENS_FALLBACK = {
+  primary: "#6366f1",
+  accent: "#06b6d4",
+  emerald: "#10b981",
+  muted: "#9aa8bd",
+  grid: "#243044",
+  card: "#0B0F19",
+  cardSoft: "rgba(255,255,255,0.02)",
+  ring: "rgba(255,255,255,0.10)",
+};
+function useTokens() {
+  const [t, setT] = useState(TOKENS_FALLBACK);
   useEffect(() => {
-    const fb = fallbackTokens();
-    const charts = [];
-    for (let i = 1; i <= 8; i++) {
-      const v = readCssVar(`--chart-${i}`);
-      if (v) charts.push(v);
-    }
-    setTokens({
-      primary: readCssVar("--color-primary") || fb.primary,
-      secondary: readCssVar("--color-secondary") || fb.secondary,
-      accent: readCssVar("--color-accent") || fb.accent,
-      success: readCssVar("--color-success") || fb.success,
-      danger: readCssVar("--color-danger") || fb.danger,
-      warning: readCssVar("--color-warning") || fb.warning,
-      info: readCssVar("--color-info") || fb.info,
-      muted: readCssVar("--color-muted") || fb.muted,
-      grid: readCssVar("--color-grid") || fb.grid,
-      charts: charts.length ? charts : fb.charts,
+    setT({
+      primary: cssVar("--color-primary", TOKENS_FALLBACK.primary),
+      accent: cssVar("--color-accent", TOKENS_FALLBACK.accent),
+      emerald: cssVar("--color-success", TOKENS_FALLBACK.emerald),
+      muted: cssVar("--color-muted", TOKENS_FALLBACK.muted),
+      grid: cssVar("--color-grid", TOKENS_FALLBACK.grid),
+      card: cssVar("--card", TOKENS_FALLBACK.card) || TOKENS_FALLBACK.card,
+      cardSoft: TOKENS_FALLBACK.cardSoft,
+      ring: TOKENS_FALLBACK.ring,
     });
   }, []);
-  return tokens;
+  return t;
+}
+const shadowXL = "0 20px 70px rgba(0,0,0,.45)";
+const divider = "linear-gradient(90deg, transparent, rgba(255,255,255,.075), transparent)";
+
+/* ===================== CONSTANT LINKS ===================== */
+const LINKS = {
+  pricing: "https://qet-web.vercel.app/pricing",
+  groupme: "https://groupme.com/join_group/110861155/abrXDGzA",
+  discord: "https://discord.gg/AnNCXCef",
+};
+
+/* ===================== UI ATOMS ===================== */
+function Section({ icon, title, subtitle, right, children, className, bodyClass, tone = "default" }) {
+  const t = useTokens();
+
+  const tones = {
+    default: {
+      bg: t.card,
+      headBg: "linear-gradient(180deg, rgba(255,255,255,.05), transparent)",
+      border: t.grid,
+      halo: `0 1px 0 0 ${t.ring} inset`,
+    },
+    accent: {
+      bg: `linear-gradient(180deg, rgba(99,102,241,.08), rgba(6,182,212,.06))`,
+      headBg: "linear-gradient(180deg, rgba(99,102,241,.12), transparent)",
+      border: "rgba(99,102,241,.35)",
+      halo: `0 1px 0 0 rgba(99,102,241,.3) inset`,
+    },
+  };
+  const c = tones[tone] || tones.default;
+
+  return (
+    <section
+      className={`rounded-2xl border overflow-hidden ${className || ""}`}
+      style={{ borderColor: c.border, background: c.bg, boxShadow: shadowXL }}
+    >
+      <header
+        className="px-4 md:px-5 pt-4 pb-3 flex items-start justify-between gap-3"
+        style={{ background: c.headBg, boxShadow: c.halo }}
+      >
+        <div>
+          <div className="flex items-center gap-2">
+            {icon && (
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/10 text-white/85 ring-1 ring-white/10">
+                {icon}
+              </span>
+            )}
+            <h2 className="text-sm md:text-[15px] font-semibold tracking-wide text-white/90">
+              {title}
+            </h2>
+          </div>
+          {subtitle && <p className="text-xs mt-1 text-white/60">{subtitle}</p>}
+        </div>
+        {right}
+      </header>
+      <div className="h-px w-full" style={{ backgroundImage: divider }} />
+      <div className={`p-4 md:p-5 ${bodyClass || ""}`}>{children}</div>
+    </section>
+  );
 }
 
-/* ---------------- helpers ---------------- */
-const DEFAULT_ACTIVE = { symbol: "AAPL", asset_type: "stock" };
-const fmtUSD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-
-function toNum(v) {
-  if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  const s = String(v).trim();
-  if (!s) return null;
-  const neg = /^\(.*\)$/.test(s);
-  const cleaned = s.replace(/^\((.*)\)$/, "$1").replace(/[,$\s]/g, "").replace(/[^0-9.\-]/g, "");
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return null;
-  return neg ? -n : n;
+function PillLink({ href, children, tone = "default", title }) {
+  const t = useTokens();
+  const styles =
+    tone === "primary"
+      ? { background: "rgba(99,102,241,.15)", color: "#c7c9ff", borderColor: "rgba(99,102,241,.35)" }
+      : tone === "emerald"
+      ? { background: "rgba(16,185,129,.15)", color: "#b6f3dc", borderColor: "rgba(16,185,129,.35)" }
+      : { background: "rgba(255,255,255,.06)", color: "#e5e7eb", borderColor: t.grid };
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={title}
+      className="px-3 py-1.5 rounded-full text-xs border hover:opacity-95 transition"
+      style={styles}
+    >
+      {children}
+    </a>
+  );
 }
-function groupBy(arr, key) {
-  return arr.reduce((acc, item) => {
-    const k = item[key] ?? "—";
-    (acc[k] ??= []).push(item);
-    return acc;
-  }, {});
+
+/* ===================== QE NEWS (Teacher announcements) ===================== */
+function QuantumEdgeNewsPanel() {
+  const t = useTokens();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let ok = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await api.get("/api/internal/news/");
+        const list = res?.data?.items || res?.data || [];
+        if (ok) setItems(Array.isArray(list) ? list : []);
+      } catch {
+        if (ok) setItems([]);
+      } finally {
+        if (ok) setLoading(false);
+      }
+    })();
+    return () => {
+      ok = false;
+    };
+  }, []);
+
+  return (
+    <Section
+      title="Quantum Edge News"
+      subtitle="Announcements • changes • roadmap • maintenance"
+      icon={<span className="text-xs">📣</span>}
+      tone="accent"
+      bodyClass="space-y-4"
+      right={
+        <div className="hidden md:flex items-center gap-2">
+          <PillLink href={LINKS.pricing} tone="primary" title="Pricing & plans">
+            Pricing
+          </PillLink>
+          <PillLink href={LINKS.groupme} tone="emerald" title="Join GroupMe">
+            Join GroupMe
+          </PillLink>
+          <PillLink href={LINKS.discord} tone="emerald" title="Join Discord">
+            Join Discord
+          </PillLink>
+        </div>
+      }
+    >
+      {loading ? (
+        <div className="animate-pulse space-y-2">
+          <div className="h-4 rounded bg-white/10" />
+          <div className="h-4 rounded bg-white/10" />
+          <div className="h-4 rounded bg-white/10 w-2/3" />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="text-sm text-white/80">No internal updates yet.</div>
+      ) : (
+        <ul className="space-y-3">
+          {items.map((n) => (
+            <li
+              key={n.id ?? `${n.title}-${n.created_at}`}
+              className="rounded-xl border p-3 md:p-4"
+              style={{ borderColor: t.grid, background: t.cardSoft }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-[15px] font-medium text-white/95 truncate">
+                    {n.title || "Update"}
+                  </div>
+                  {n.body && (
+                    <div className="text-sm text-white/75 mt-1 whitespace-pre-wrap leading-relaxed">
+                      {n.body}
+                    </div>
+                  )}
+                </div>
+                <div className="shrink-0 text-[11px] text-white/55 text-right">
+                  {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
 }
 
-/* ---------------- page ---------------- */
+/* ===================== PAGE ===================== */
+const DEFAULT_ACTIVE = { symbol: "XAUUSD", asset_type: "forex" };
+
 export default function Dashboard() {
-  const tokens = useColorTokens();
-
+  const t = useTokens();
   const [active, setActive] = useState(DEFAULT_ACTIVE);
   const [alertOpen, setAlertOpen] = useState(false);
 
-  const [headline, setHeadline] = useState(null);
-  const [loadingHeadline, setLoadingHeadline] = useState(true);
-
-  const [tlTrades, setTlTrades] = useState([]);
-  const [loadingTL, setLoadingTL] = useState(true);
-
   const headerTitle = useMemo(() => {
     const s = (active?.symbol || "").toUpperCase();
-    const t = (active?.asset_type || "").toUpperCase();
-    return s ? `${s} · ${t}` : "Dashboard";
+    const at = (active?.asset_type || "").toUpperCase();
+    return s ? `${s} · ${at}` : "Dashboard";
   }, [active]);
 
-  // headline analytics
-  useEffect(() => {
-    let ok = true;
-    (async () => {
-      try {
-        setLoadingHeadline(true);
-        const res = await api.get("/api/journal/analytics/");
-        if (!ok) return;
-        setHeadline(res.data?.headline || null);
-      } catch (e) {
-        console.error("headline analytics failed", e);
-      } finally {
-        if (ok) setLoadingHeadline(false);
-      }
-    })();
-    return () => { ok = false; };
-  }, []);
-
-  // TraderLab snapshot
-  useEffect(() => {
-    let ok = true;
-    (async () => {
-      try {
-        setLoadingTL(true);
-        const { data: runs } = await api.get("/api/journal/backtests/runs/");
-        const tl = (runs || []).find(r => /^TraderLab/i.test(r.name));
-        if (!tl) { if (ok) setTlTrades([]); return; }
-        const { data: trades } = await api.get(`/api/journal/backtests/trades/?run=${tl.id}`);
-        if (ok) setTlTrades(trades || []);
-      } catch (e) {
-        console.error("Failed to load TraderLab snapshot", e);
-        if (ok) setTlTrades([]);
-      } finally {
-        if (ok) setLoadingTL(false);
-      }
-    })();
-    return () => { ok = false; };
-  }, []);
-
-  // derived snapshot
-  const derived = useMemo(() => {
-    const rows = (tlTrades || []).map(t => ({
-      id: t.id,
-      symbol: t.symbol || "—",
-      trade_time: t.trade_time || null,
-      pnl: toNum(t.net_pnl) ?? null,
-    }));
-
-    const bySymbol = groupBy(rows, "symbol");
-    const perSymbol = Object.entries(bySymbol).map(([symbol, list]) => {
-      const netPnL = list.reduce((s, r) => s + (r.pnl ?? 0), 0);
-      const wins = list.filter((r) => (r.pnl ?? 0) > 0).length;
-      const count = list.length;
-      return {
-        symbol,
-        trades: count,
-        wins,
-        winRate: count ? (wins / count) * 100 : 0,
-        netPnL,
-      };
-    }).sort((a,b)=>Math.abs(b.netPnL)-Math.abs(a.netPnL));
-
-    let pieData = perSymbol.map((s) => ({ name: s.symbol, value: Math.abs(s.netPnL) }))
-      .filter(d => Number.isFinite(d.value) && d.value > 0);
-    if (pieData.length === 0 && perSymbol.length > 0) {
-      pieData = perSymbol.map((s) => ({ name: s.symbol, value: Math.max(1, s.trades) }));
-    }
-    const barData = perSymbol.map((s) => ({ symbol: s.symbol, pnl: Number((s.netPnL ?? 0).toFixed(2)) })).slice(0, 12);
-
-    const hourBuckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, wins: 0, total: 0 }));
-    rows.forEach((r) => {
-      if (!r.trade_time) return;
-      const hh = Number(String(r.trade_time).split(":")[0]);
-      if (!Number.isFinite(hh) || hh < 0 || hh > 23) return;
-      hourBuckets[hh].total += 1;
-      if ((r.pnl ?? 0) > 0) hourBuckets[hh].wins += 1;
-    });
-    const hourData = hourBuckets.map((b) => ({
-      hour: b.hour,
-      winRate: b.total ? (b.wins / b.total) * 100 : 0,
-      total: b.total,
-    }));
-    const bestHour = hourData.reduce(
-      (acc, b) => (b.total > 0 && (b.winRate > acc.winRate || (b.winRate === acc.winRate && b.total > acc.total))) ? b : acc,
-      { hour: null, winRate: -1, total: 0 }
-    );
-
-    return { pieData, barData, hourData, bestHour };
-  }, [tlTrades]);
-
-  const selectionBg = hexToRgba(tokens.accent, 0.35);
-  const darkTooltip = {
-    borderRadius: 12,
-    borderColor: tokens.grid,
-    background: "rgba(15,17,21,0.98)",
-    color: "#e5e7eb",
-  };
-
   return (
-    <div className="px-4 md:px-6 lg:px-8 py-6 space-y-5">
-      <style>{`::selection { background: ${selectionBg}; }`}</style>
-
-      {/* Top bar */}
+    <div className="px-4 md:px-6 lg:px-8 py-6 space-y-6">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-neutral-100">Dashboard</h1>
-          <p className="text-sm" style={{ color: tokens.muted }}>{headerTitle}</p>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">Dashboard</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setAlertOpen(true)}
-            className="px-3 py-2 rounded-xl border text-neutral-200 hover:text-neutral-100 bg-transparent"
-            style={{ border:`1px solid ${hexToRgba(tokens.accent,0.55)}` }}
+            className="px-3 py-2 rounded-xl text-sm text-white bg-white/5 hover:bg-white/10 border"
+            style={{ borderColor: t.grid }}
           >
             Alert Center
           </button>
-          <Link to="/traderlab" className="px-3 py-2 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-neutral-100">
-            TraderLab
-          </Link>
-          <Link to="/backtesting" className="px-3 py-2 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-neutral-100">
-            Backtesting
-          </Link>
-          <Link to="/psych-quiz" className="px-3 py-2 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-neutral-100">
-            Psych Quiz
-          </Link>
-          <Link to="/journal" className="px-3 py-2 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-neutral-100">
-            Journal
-          </Link>
-          <Link to="/courses" className="px-3 py-2 rounded-xl border border-neutral-700 hover:border-neutral-600 text-neutral-200 hover:text-neutral-100">
-            Courses
-          </Link>
         </div>
       </div>
 
-      {/* One-line clocks */}
+      {/* Market clocks */}
       <MarketClocks />
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-        <KPICard label="Trades" value={loadingHeadline ? "…" : (headline?.total_trades ?? "—")} />
-        <KPICard label="Win rate" value={loadingHeadline ? "…" : `${(headline?.win_rate ?? 0).toFixed(1)}%`} />
-        <KPICard label="Net P&L" value={loadingHeadline ? "…" : fmtUSD.format(headline?.net_pnl ?? 0)} accent />
-        <KPICard label="Avg Win" value={loadingHeadline ? "…" : fmtUSD.format(headline?.avg_win ?? 0)} />
-        <KPICard label="Avg Loss" value={loadingHeadline ? "…" : fmtUSD.format(headline?.avg_loss ?? 0)} />
-        <KPICard label="Expectancy" value={loadingHeadline ? "…" : fmtUSD.format(headline?.expectancy ?? 0)} />
-        <KPICard label="Max Drawdown" value={loadingHeadline ? "…" : fmtUSD.format(headline?.max_drawdown ?? 0)} />
-      </div>
+      {/* 1) QE NEWS — top & prominent */}
+      <QuantumEdgeNewsPanel />
 
-      {/* Performance snapshot (TraderLab) */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl p-4 overflow-hidden border border-neutral-800 bg-[color:var(--card,#0B0B10)]">
-          <div className="text-sm mb-1 text-neutral-400">Profit Share (TraderLab)</div>
-          <div className="text-xs mb-2 text-neutral-500">
-            {loadingTL ? "Loading…" : (derived.pieData.length ? "Share of abs P&L by symbol" : "No P&L yet — equalized by activity")}
-          </div>
-          <div style={{ height: 220 }}>
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={derived.pieData} dataKey="value" nameKey="name" outerRadius={90} innerRadius={42} paddingAngle={2}>
-                  {derived.pieData.map((_, i) => (
-                    <Cell key={i} stroke="rgba(255,255,255,0.08)" strokeWidth={1} fill={tokens.charts[i % tokens.charts.length]} />
-                  ))}
-                </Pie>
-                <ReTooltip contentStyle={darkTooltip} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+      {/* 2) **SWAPPED** FOREX CALENDAR (LEFT, WIDE) + MARKET NEWS (RIGHT, NARROW) */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* LEFT: Calendar (2/3) */}
+        <div className="xl:col-span-2">
+          <Section
+            title="Forex Calendar"
+            subtitle="Upcoming events and expected impact"
+            icon={<span className="text-xs">🗓️</span>}
+          >
+            <ForexCalendar />
+          </Section>
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl p-4 overflow-hidden border border-neutral-800 bg-[color:var(--card,#0B0B10)]">
-          <div className="text-sm mb-2 text-neutral-400">P&L by Symbol (TraderLab)</div>
-          <div style={{ height: 220 }}>
-            <ResponsiveContainer>
-              <BarChart data={derived.barData}>
-                <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
-                <XAxis dataKey="symbol" stroke="#9ca3af" />
-                <YAxis stroke="#9ca3af" />
-                <ReTooltip formatter={(v) => fmtUSD.format(v)} contentStyle={darkTooltip} />
-                <Bar dataKey="pnl">
-                  {derived.barData.map((d, i) => (
-                    <Cell key={i} fill={d.pnl >= 0 ? tokens.success : tokens.danger} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        {/* RIGHT: Market News (1/3) */}
+        <div className="xl:col-span-1">
+          <Section
+            title="Market News"
+            subtitle={headerTitle}
+            icon={<span className="text-xs">📰</span>}
+            right={
+              <div className="hidden md:flex items-center gap-2 text-xs text-white/60">
+                <span className="h-2 w-2 rounded-full bg-emerald-400/85" /> Live
+              </div>
+            }
+            bodyClass="p-0"
+          >
+            <div className="max-h-[62vh] overflow-auto p-4 md:p-5">
+              <NewsFeed symbol={active?.symbol} assetType={active?.asset_type} />
+            </div>
+          </Section>
         </div>
       </div>
 
-      {/* Hour-of-day snapshot */}
-      <div className="rounded-2xl p-4 overflow-hidden border border-neutral-800 bg-[color:var(--card,#0B0B10)]">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-neutral-400">Trading Hours · win%</div>
-          <div className="text-xs text-neutral-500">
-            Best hour:&nbsp;
-            {derived.bestHour.hour === null ? "—" :
-              `${String(derived.bestHour.hour).padStart(2,"0")}:00–${String((derived.bestHour.hour+1)%24).padStart(2,"0")}:00`}
-            {derived.bestHour.hour !== null && ` • ${derived.bestHour.winRate.toFixed(0)}% on ${derived.bestHour.total} trades`}
-          </div>
+      {/* 3) CHART (LARGE) + WATCHLIST (SMALLER) */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Chart: 2/3 width on xl */}
+        <div className="xl:col-span-2">
+          <Section
+            title="Chart"
+            subtitle="Lightweight chart for quick analysis"
+            icon={<span className="text-xs">📊</span>}
+            bodyClass="p-0"
+          >
+            <div className="p-4 md:p-5">
+              <div className="rounded-xl overflow-hidden ring-1 ring-white/10">
+                <LiteChart active={active} />
+              </div>
+            </div>
+          </Section>
         </div>
-        <div style={{ height: 200 }}>
-          <ResponsiveContainer>
-            <BarChart data={derived.hourData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
-              <XAxis dataKey="hour" tickFormatter={(h) => String(h).padStart(2,"0")} stroke="#9ca3af" />
-              <YAxis domain={[0,100]} tickFormatter={(v)=>`${v}%`} stroke="#9ca3af" />
-              <ReTooltip formatter={(v,n,p)=>[`${(v ?? 0).toFixed?.(0) ?? v}%`, `${String(p?.payload?.hour).padStart(2,"0")}:00`]} contentStyle={darkTooltip} />
-              <Bar dataKey="winRate">
-                {(derived.hourData||[]).map((d,i)=>{
-                  const rate=d.winRate||0; let color=tokens.danger;
-                  if (rate>=80) color=tokens.success; else if (rate>=60) color="#facc15"; else if (rate>=40) color="#f97316";
-                  return <Cell key={i} fill={color} />;
-                })}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+
+        {/* Watchlist: 1/3 width on xl */}
+        <div className="xl:col-span-1">
+          <Section
+            title="Watchlist"
+            subtitle="Click any symbol to load the chart"
+            icon={<span className="text-xs">📈</span>}
+          >
+            <div className="rounded-xl border" style={{ borderColor: t.grid, background: t.cardSoft }}>
+              <Watchlist onSelectSymbol={(s) => s && setActive(s)} />
+            </div>
+          </Section>
         </div>
       </div>
 
-      {/* Main content: Chart + Watchlist */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-2xl p-4 overflow-hidden border border-neutral-800 bg-[color:var(--card,#0B0B10)]">
-          <div className="text-sm uppercase tracking-wide mb-3 text-neutral-400">Chart</div>
-          <ChartCard active={active} />
-        </div>
-        <div className="lg:col-span-1">
-          <Watchlist onSelectSymbol={(s) => s && setActive(s)} />
-        </div>
-      </div>
-
-      {/* Forex Calendar (full width) */}
-      <div>
-        <div className="text-sm uppercase tracking-wide mb-3 text-neutral-400">Forex Calendar</div>
-        <ForexCalendar />
-      </div>
-
-      {/* News (full width) */}
-      <div className="rounded-2xl p-4 overflow-hidden border border-neutral-800">
-        <div className="text-sm uppercase tracking-wide mb-3 text-neutral-400">News</div>
-        <div className="max-h-[680px] overflow-auto pr-1">
-          <NewsFeed symbol={active?.symbol} assetType={active?.asset_type} />
-        </div>
-      </div>
-
-      {/* Alert Center */}
+      {/* Overlays */}
       <AlertCenter open={alertOpen} onClose={() => setAlertOpen(false)} />
     </div>
   );
 }
-
-
-

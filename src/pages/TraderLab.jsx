@@ -3,182 +3,123 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
 import { api } from "../api/axios";
 import JournalPanel from "../components/JournalPanel";
-
-/* ---------------- icons (inline SVG) ---------------- */
-function IconButton({ title, onClick, children, style, className = "" }) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={`p-2 rounded-xl border hover:opacity-90 ${className}`}
-      style={style}
-    >
-      {children}
-    </button>
-  );
-}
-const SaveIcon = ({ size = 18, color = "currentColor" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path d="M5 3h10l4 4v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" stroke={color} strokeWidth="1.5"/>
-    <path d="M7 3v6h8V3" stroke={color} strokeWidth="1.5"/>
-    <rect x="7" y="13" width="10" height="6" rx="1.5" stroke={color} strokeWidth="1.5"/>
-  </svg>
-);
-const TrashIcon = ({ size = 18, color = "currentColor" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path d="M4 7h16" stroke={color} strokeWidth="1.5"/>
-    <path d="M10 3h4a1 1 0 0 1 1 1v2H9V4a1 1 0 0 1 1-1z" stroke={color} strokeWidth="1.5"/>
-    <path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" stroke={color} strokeWidth="1.5"/>
-    <path d="M10 11v6M14 11v6" stroke={color} strokeWidth="1.5"/>
-  </svg>
-);
-
-/* ---------------- color tokens ---------------- */
-function readCssVar(name) {
-  if (typeof window === "undefined") return "";
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-function fallbackTokens() {
-  return {
-    primary: "#4f46e5",
-    secondary: "#7c3aed",
-    accent: "#06b6d4",
-    success: "#10b981",
-    danger: "#ef4444",
-    warning: "#f59e0b",
-    info: "#0ea5e9",
-    muted: "#94a3b8",
-    grid: "#1f2937", // dark border
-    charts: ["#4f46e5","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316","#14b8a6"],
-  };
-}
-function hexToRgba(hex, alpha = 1) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-function useColorTokens() {
-  const [tokens, setTokens] = useState(fallbackTokens());
-  useEffect(() => {
-    const fb = fallbackTokens();
-    const charts = [];
-    for (let i = 1; i <= 8; i++) {
-      const v = readCssVar(`--chart-${i}`);
-      if (v) charts.push(v);
-    }
-    setTokens({
-      primary: readCssVar("--color-primary") || fb.primary,
-      secondary: readCssVar("--color-secondary") || fb.secondary,
-      accent: readCssVar("--color-accent") || fb.accent,
-      success: readCssVar("--color-success") || fb.success,
-      danger: readCssVar("--color-danger") || fb.danger,
-      warning: readCssVar("--color-warning") || fb.warning,
-      info: readCssVar("--color-info") || fb.info,
-      muted: readCssVar("--color-muted") || fb.muted,
-      grid: readCssVar("--color-grid") || fb.grid,
-      charts: charts.length ? charts : fb.charts,
-    });
-  }, []);
-  return tokens;
-}
+import LotSizePanel from "../components/LotSizePanel.jsx";
 
 /* ---------------- helpers ---------------- */
-function toNum(v) {
-  if (v === null || v === undefined || v === "") return null;
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  const s = String(v).trim();
+function num(v){ if(v===""||v==null) return null; const n=Number(v); return Number.isFinite(n)?n:null; }
+const money = (v)=> (Number(v||0)).toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2});
+
+const LAST_ACCOUNT_KEY = "qe:lastTraderLabAccountId";
+const LAST_MONTH_FILTER_KEY = "qe:traderLabMonthFilter";
+const LAST_TZ_KEY = "qe:traderLabTzShift";
+const pnlMultKey = (runId)=>`qe:pnlMult:${runId||"default"}`;
+const acctSizeKey = (runId)=>`qe:acctSize:${runId||"default"}`;
+
+const tokens = {
+  muted: "#9aa8bd",
+  grid: "#263245",
+  primary: "#4f46e5",
+  success: "#16a34a",
+  danger: "#ef4444",
+  charts: ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316","#14b8a6","#84cc16","#10b981","#fb7185","#60a5fa"],
+};
+function rgba(hex, a){
+  const h=hex.replace("#","");
+  const s = h.length===3 ? h.split("").map(c=>c+c).join("") : h;
+  const n=parseInt(s,16);
+  const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+function winRateColor(rate){
+  const r = Number(rate)||0;
+  if (r < 40) return tokens.danger;
+  if (r < 60) return "#f97316";
+  if (r < 80) return "#facc15";
+  return tokens.success;
+}
+
+/** Parse a number from mixed currency/parentheses text like "($12.34)", "1,250.00", "12.3 pips" */
+function toNumberLoose(x) {
+  if (x === null || x === undefined) return null;
+  if (typeof x === "number" && Number.isFinite(x)) return x;
+  let s = String(x).trim();
   if (!s) return null;
-  const neg = /^\(.*\)$/.test(s);
-  const cleaned = s.replace(/^\((.*)\)$/, "$1").replace(/[,$\s]/g, "").replace(/[^0-9.\-]/g, "");
-  const n = Number(cleaned);
+  const neg = /^\(.*\)$/.test(s) || /\b(loss|loser|red)\b/i.test(s);
+  s = s.replace(/^\(|\)$/g, "").replace(/[^0-9.\-]/g, "");
+  if (!s) return null;
+  const n = Number(s);
   if (!Number.isFinite(n)) return null;
   return neg ? -n : n;
 }
-function groupBy(arr, key) {
-  return arr.reduce((acc, item) => {
-    const k = item[key] ?? "—";
-    (acc[k] ??= []).push(item);
-    return acc;
-  }, {});
-}
-const fmtMoney = (v) =>
-  (v ?? 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 
-/* ---- FX assist helpers ---- */
-function parseFx(symRaw) {
-  if (!symRaw) return null;
-  const s = String(symRaw).toUpperCase().replace(/\s+/g, "");
-  if (/^[A-Z]{6}$/.test(s)) return { base: s.slice(0,3), quote: s.slice(3) };
-  if (/^[A-Z]{3}\/[A-Z]{3}$/.test(s)) return { base: s.slice(0,3), quote: s.slice(4,7) };
+/** Extract a numeric value from the notes by a list of labels */
+function pickFromNotes(notes, labels) {
+  const txt = String(notes || "");
+  for (const lab of labels) {
+    // Accept "LABEL = 123", "LABEL: 123", "label 123"
+    const re = new RegExp(`${lab}\\s*[:=]?\\s*([\\$\\(\\)\\-0-9.,]+)`, "i");
+    const m = txt.match(re);
+    if (m && m[1] != null) {
+      const v = toNumberLoose(m[1]);
+      if (v !== null) return v;
+    }
+  }
   return null;
 }
-function pipSizeFor(quote) {
-  return quote === "JPY" ? 0.01 : 0.0001;
-}
-function fxDecimalsFor(quote) {
-  return quote === "JPY" ? 3 : 5;
-}
 
-/* ---- Row background helpers (dark hover) ---- */
-function rowBgs(tokens) {
-  return {
-    base: hexToRgba(tokens.accent, 0.06),
-    hover: hexToRgba(tokens.accent, 0.12),
-  };
+/** 0=Mon..6=Sun */
+function jsDowIndex(isoDate) {
+  const dt = new Date(isoDate+"T00:00:00");
+  return (dt.getDay()+6)%7;
 }
 
-/* ---- Notes parsing (SL/TP/STRAT/MODE) ---- */
-function parseMetaFromNotes(notes) {
-  const out = { sl: null, tp: null, strategy: null, mode: null };
-  if (!notes) return out;
-  const text = String(notes);
-
-  const mSL = text.match(/(?:^|\b)SL:\s*([0-9.]+)/i);
-  if (mSL) out.sl = toNum(mSL[1]);
-
-  const mTP = text.match(/(?:^|\b)TP:\s*([0-9.]+)/i);
-  if (mTP) out.tp = toNum(mTP[1]);
-
-  const mStrat = text.match(/STRAT(?:EGY)?:\s*([^|]+?)(?:\s*\||$)/i);
-  if (mStrat) out.strategy = mStrat[1].trim();
-
-  const mMode = text.match(/MODE:\s*([^|]+?)(?:\s*\||$)/i);
-  if (mMode) out.mode = mMode[1].trim().toUpperCase();
-
-  return out;
-}
+const TZ_CHOICES = [
+  { label: "UTC−8 (PST)", value: -8 },
+  { label: "UTC−7 (MST)", value: -7 },
+  { label: "UTC−6 (CST)", value: -6 },
+  { label: "UTC−5 (ET Standard)", value: -5 },
+  { label: "UTC−4 (ET Daylight)", value: -4 },
+  { label: "UTC−3", value: -3 },
+  { label: "UTC−2", value: -2 },
+  { label: "UTC−1", value: -1 },
+  { label: "UTC±0", value: 0 },
+  { label: "UTC+1", value: 1 },
+  { label: "UTC+2", value: 2 },
+  { label: "UTC+3", value: 3 },
+  { label: "UTC+4", value: 4 },
+  { label: "UTC+5", value: 5 },
+  { label: "UTC+8", value: 8 },
+];
 
 /* ---------------- page ---------------- */
 export default function TraderLab() {
-  const tokens = useColorTokens();
-
-  const [runId, setRunId] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [accountId, setAccountId] = useState("");
   const [trades, setTrades] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // run meta (editable)
-  const [runMeta, setRunMeta] = useState({ name: "TraderLab", initial_capital: "", notes: "" });
-  const [savingRun, setSavingRun] = useState(false);
-  const [deletingRun, setDeletingRun] = useState(false);
+  const [pnlMult, setPnlMult] = useState(1);
+  const [acctSize, setAcctSize] = useState(0);
 
-  // CSV preview
+  const [monthFilter, setMonthFilter] = useState(()=>{
+    try { return localStorage.getItem(LAST_MONTH_FILTER_KEY) || "all"; } catch { return "all"; }
+  });
+
   const [csvPreviewRows, setCsvPreviewRows] = useState(null);
   const [csvFile, setCsvFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [tzShift, setTzShift] = useState(()=>{
+    try { return Number(localStorage.getItem(LAST_TZ_KEY) || -5); } catch { return -5; }
+  });
 
-  // attachments
-  const [imageUploading, setImageUploading] = useState(null);
-  const fileInputRef = useRef(null);
-
-  // manual form
   const [form, setForm] = useState({
     date: "",
-    trade_time: "",
+    time_h: "9",
+    time_ampm: "AM",
     symbol: "",
     direction: "long",
     size: "",
@@ -186,1077 +127,907 @@ export default function TraderLab() {
     stop_price: "",
     target_price: "",
     fee: "",
-    notes: "",
     strategy: "",
+    notes: "",
   });
-  const [formAttachment, setFormAttachment] = useState(null);
+  const attachRef = useRef(null);
+  const [attachFile, setAttachFile] = useState(null);
 
-  // FX Assist (client-side)
-  const [fxCfg, setFxCfg] = useState({
-    enabled: false,
-    pipUSD: "10",
-    sizeIsLots: true,
-    preset: "AUTO"
-  });
+  const [showMgr, setShowMgr] = useState(false);
+  const [notice, setNotice] = useState(null);
 
-  // Risk config (non-FX per-point + risk $/trade)
-  const [riskCfg, setRiskCfg] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("qe.riskCfg.traderlab") || "{}"); } catch { return {}; }
-  });
-  useEffect(() => {
-    const merged = {
-      riskPerTradeUSD: riskCfg?.riskPerTradeUSD ?? "100",
-      perPointUSD: riskCfg?.perPointUSD ?? "1",
-    };
-    if (JSON.stringify(merged) !== JSON.stringify(riskCfg)) setRiskCfg(merged);
-    localStorage.setItem("qe.riskCfg.traderlab", JSON.stringify(merged));
-  }, [riskCfg]);
+  // NOTES MODAL
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesContent, setNotesContent] = useState("");
+  const [notesTitle, setNotesTitle] = useState("");
 
-  // ensure a single TraderLab run exists
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data:runs } = await api.get("/api/journal/backtests/runs/");
-        let run = (runs || []).find(r => /^TraderLab/i.test(r.name));
-        if (!run) {
-          const res = await api.post("/api/journal/backtests/runs/", { name: "TraderLab" });
-          run = res.data;
-        }
-        setRunId(run.id);
-        setRunMeta({
-          name: run.name || "TraderLab",
-          initial_capital: String(run.initial_capital ?? ""),
-          notes: run.notes || "",
-        });
-        await loadTrades(run.id);
-      } catch (e) {
-        console.error(e);
+  const flash = (type, text)=>{ setNotice({type, text}); setTimeout(()=>setNotice(null), 2400); };
+
+  function updateForm(patch){
+    setForm(f=>({ ...f, ...patch }));
+  }
+
+  useEffect(()=>{ loadAccounts(); }, []);
+  async function loadAccounts(prefer=""){
+    try{
+      const {data} = await api.get("/api/journal/backtests/runs/");
+      const list = data || [];
+      setAccounts(list);
+      let stored = ""; try{ stored = localStorage.getItem(LAST_ACCOUNT_KEY)||""; }catch(e){}
+      const first = (list[0] && list[0].id) ? String(list[0].id) : "";
+      const want = prefer || stored;
+      const sel = (want && list.some(r=>String(r.id)===String(want))) ? want : first;
+      setAccountId(sel);
+      if (sel){
+        try{ localStorage.setItem(LAST_ACCOUNT_KEY, sel); }catch(e){}
+        await loadTrades(sel);
+        try {
+          setPnlMult(Number(localStorage.getItem(pnlMultKey(sel)) || 1));
+          setAcctSize(Number(localStorage.getItem(acctSizeKey(sel)) || 0));
+        } catch {}
+      } else {
+        setTrades([]);
       }
-    })();
-  }, []);
-
-  async function loadTrades(id) {
+    }catch(e){ console.error("loadAccounts",e); }
+  }
+  async function loadTrades(id){
     setLoading(true);
-    try {
-      const { data } = await api.get(`/api/journal/backtests/trades/?run=${id}`);
-      setTrades(data || []);
-    } catch (e) {
-      console.error(e);
-      setTrades([]);
-    } finally { setLoading(false); }
+    try{
+      const {data} = await api.get("/api/journal/backtests/trades/?run="+encodeURIComponent(id));
+      setTrades(data||[]);
+    }catch(e){ console.error(e); setTrades([]); }
+    finally{ setLoading(false); }
   }
 
-  // compute P&L with optional FX assist
-  function computePnL(t) {
-    const entry = toNum(t.entry_price);
-    const exit  = toNum(t.exit_price);
-    const size  = toNum(t.size);
-    const fee   = toNum(t.fee) ?? 0;
-    if (entry == null || exit == null || size == null) return null;
-
-    const fx = parseFx(t.symbol);
-    if (fxCfg.enabled && fx) {
-      const pipSz = pipSizeFor(fx.quote);
-      const pips = (t.direction === "short" ? (entry - exit) : (exit - entry)) / pipSz;
-      const perLotUSD = toNum(fxCfg.pipUSD) ?? 10;
-      const lots = fxCfg.sizeIsLots ? (size || 0) : (size / 100000);
-      const pnlUSD = (pips * perLotUSD * (lots || 0)) - fee;
-      if (Number.isFinite(pnlUSD)) return pnlUSD;
-    }
-    const gross = (t.direction === "short" ? (entry - exit) * size : (exit - entry) * size);
-    return (gross - fee);
+  async function createAccount(){
+    const name = window.prompt("Account name?");
+    if(!name) return;
+    try{
+      const {data} = await api.post("/api/journal/backtests/runs/", { name });
+      await loadAccounts(String(data.id));
+      flash("ok","Account created");
+    }catch{ window.alert("Failed to create account."); }
+  }
+  async function renameAccount(id){
+    const name = window.prompt("Rename account:");
+    if(!name) return;
+    try{
+      await api.patch("/api/journal/backtests/runs/"+id+"/", { name });
+      await loadAccounts(String(id));
+      flash("ok","Renamed");
+    }catch{ window.alert("Rename failed"); }
+  }
+  async function deleteAccount(id){
+    if(!window.confirm("Delete this account and ALL its trades?")) return;
+    try{
+      await api.delete("/api/journal/backtests/runs/"+id+"/");
+      await loadAccounts("");
+      flash("ok","Account deleted");
+    }catch{ window.alert("Delete failed"); }
   }
 
-  // planned RR and realized R helpers
-  function computePlannedRR(t) {
-    const entry = toNum(t.entry_price);
-    const { sl, tp } = parseMetaFromNotes(t.notes);
-    const dir = t.direction;
-    if (entry == null || sl == null || tp == null || !dir) return null;
-
-    let riskPts, rewardPts;
-    if (dir === "long") {
-      riskPts = entry - sl;
-      rewardPts = tp - entry;
-    } else {
-      riskPts = sl - entry;
-      rewardPts = entry - tp;
-    }
-    if (!(Number.isFinite(riskPts) && riskPts > 0)) return null;
-    return rewardPts / riskPts;
-  }
-  function computeOneRUSD(t) {
-    const entry = toNum(t.entry_price);
-    const size = toNum(t.size);
-    const { sl } = parseMetaFromNotes(t.notes);
-    if (entry == null || size == null || sl == null) return null;
-
-    const fx = parseFx(t.symbol);
-    if (fxCfg.enabled && fx) {
-      const pipSz = pipSizeFor(fx.quote);
-      const pipsRisk = Math.abs(entry - sl) / pipSz;
-      const perLotUSD = toNum(fxCfg.pipUSD) ?? 10;
-      const lots = fxCfg.sizeIsLots ? size : (size / 100000);
-      const oneR = pipsRisk * perLotUSD * lots;
-      return Number.isFinite(oneR) ? oneR : null;
-    }
-    const perPoint = toNum(riskCfg.perPointUSD) || 1;
-    const oneR = Math.abs(entry - sl) * perPoint * size;
-    return Number.isFinite(oneR) ? oneR : null;
-  }
-  function classifyOutcome(plannedRR, realizedR) {
-    if (plannedRR == null || realizedR == null) return "—";
-    const eps = 0.05;
-    if (realizedR >= plannedRR - eps) return "Hit TP";
-    if (realizedR <= -1 + eps) return "Hit SL";
-    return "Closed early";
-  }
-
-  // FX presets (includes GOLD as XAUUSD approx.)
-  const FX_PRESETS = [
-    { code:"AUTO", label:"Auto/Manual" },
-    { code:"EURUSD", label:"EURUSD ($10/pip/lot)", pipUSD: 10, lots:true },
-    { code:"GBPUSD", label:"GBPUSD ($10/pip/lot)", pipUSD: 10, lots:true },
-    { code:"USDJPY", label:"USDJPY ($9.1/pip/lot)", pipUSD: 9.1, lots:true },
-    { code:"XAUUSD", label:"GOLD/XAUUSD ($1.0 per 0.1)$", pipUSD: 10, lots:true },
-  ];
-  useEffect(() => {
-    const p = FX_PRESETS.find(x => x.code === fxCfg.preset);
-    if (p && p.code !== "AUTO") {
-      setFxCfg(c => ({ ...c, pipUSD: String(p.pipUSD), sizeIsLots: p.lots }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fxCfg.preset]);
-
-  // quick actions
-  function ratioTarget(ratio) {
-    const entry = toNum(form.entry_price);
-    const stop = toNum(form.stop_price);
-    if (entry == null || stop == null) return;
-
-    const fx = parseFx(form.symbol);
-    const decimals = fx ? fxDecimalsFor(fx.quote) : 2;
-
-    if (form.direction === "long") {
-      const risk = entry - stop;
-      if (risk <= 0) return;
-      const target = entry + ratio * risk;
-      setForm(f => ({ ...f, target_price: String(target.toFixed(decimals)) }));
-    } else {
-      const risk = stop - entry;
-      if (risk <= 0) return;
-      const target = entry - ratio * risk;
-      setForm(f => ({ ...f, target_price: String(target.toFixed(decimals)) }));
-    }
-  }
-  function suggestSizeFromRisk() {
-    const entry = toNum(form.entry_price);
-    const stop = toNum(form.stop_price);
-    const risk$ = toNum(riskCfg.riskPerTradeUSD);
-    if (entry == null || stop == null || !risk$) return;
-
-    const fx = parseFx(form.symbol);
-    if (fxCfg.enabled && fx) {
-      const pipSz = pipSizeFor(fx.quote);
-      const pipsRisk = Math.abs(entry - stop) / pipSz;
-      const perLotUSD = toNum(fxCfg.pipUSD) || 10;
-      if (!pipsRisk || !perLotUSD) return;
-      const lots = risk$ / (pipsRisk * perLotUSD);
-      const val = fxCfg.sizeIsLots ? lots : Math.round(lots * 100000);
-      setForm(f => ({ ...f, size: String(Number(val.toFixed(2))) }));
-      return;
-    }
-    const perPoint = toNum(riskCfg.perPointUSD) || 1;
-    const size = risk$ / (Math.abs(entry - stop) * perPoint);
-    setForm(f => ({ ...f, size: String(Number(size.toFixed(2))) }));
-  }
-
-  const derived = useMemo(() => {
-    const rows = (trades || []).map((t) => {
-      const pnl = computePnL(t);
-      const { sl, tp, strategy } = parseMetaFromNotes(t.notes);
-      const plannedRR = computePlannedRR(t);
-      const oneR = computeOneRUSD(t);
-      const realizedR = (oneR && pnl != null) ? (pnl / oneR) : null;
-      const outcome = classifyOutcome(plannedRR, realizedR);
-      return {
-        id: t.id,
-        date: t.date,
-        trade_time: t.trade_time || null,
-        symbol: t.symbol || "—",
-        direction: t.direction || "—",
-        size: toNum(t.size) ?? null,
-        entry: toNum(t.entry_price) ?? null,
-        exit: toNum(t.exit_price) ?? null,
-        fee: toNum(t.fee) ?? 0,
-        pnl: toNum(t.net_pnl) ?? pnl ?? 0,
-        notes: t.notes || "",
-        attachment: t.attachment || null,
-        sl, tp, strategy: strategy || "—",
-        plannedRR, realizedR, outcome,
-      };
-    });
-
-    const bySymbol = groupBy(rows, "symbol");
-    const perSymbol = Object.entries(bySymbol).map(([symbol, list]) => {
-      const netPnL = list.reduce((s, r) => s + (r.pnl ?? 0), 0);
-      const wins = list.filter((r) => (r.pnl ?? 0) > 0).length;
-      const losses = list.filter((r) => (r.pnl ?? 0) < 0).length;
-      const count = list.length;
-      return { symbol, trades: count, wins, losses, winRate: count ? (wins / count) * 100 : 0, netPnL, avgPnL: count ? netPnL / count : 0 };
-    });
-
-    const byStrategy = groupBy(rows, "strategy");
-    const perStrategy = Object.entries(byStrategy).map(([strategy, list]) => {
-      const net = list.reduce((s, r) => s + (r.pnl ?? 0), 0);
-      const wins = list.filter(r => (r.pnl ?? 0) > 0).length;
-      const count = list.length;
-      const avgR = avg(list.map(r => r.realizedR).filter(x => x != null));
-      return { strategy, trades: count, wins, winRate: count ? (wins / count) * 100 : 0, netPnL: net, avgR: Number.isFinite(avgR) ? avgR : 0 };
-    });
-
-    const totals = rows.reduce(
-      (acc, r) => {
-        acc.net += r.pnl ?? 0;
-        acc.fee += r.fee ?? 0;
-        acc.wins += (r.pnl ?? 0) > 0 ? 1 : 0;
-        acc.losses += (r.pnl ?? 0) < 0 ? 1 : 0;
-        return acc;
-      },
-      { net: 0, fee: 0, wins: 0, losses: 0 }
-    );
-    const winRate = rows.length ? (totals.wins / rows.length) * 100 : 0;
-
-    let pieData = perSymbol.map((s) => ({ name: s.symbol, value: Math.abs(s.netPnL) }))
-      .filter((d) => Number.isFinite(d.value) && d.value > 0);
-    if (pieData.length === 0 && perSymbol.length > 0) {
-      pieData = perSymbol.map((s) => ({ name: s.symbol, value: Math.max(1, s.trades) }));
-    }
-    const barData = perSymbol.map((s) => ({ symbol: s.symbol, pnl: Number((s.netPnL ?? 0).toFixed(2)) }))
-      .filter((d) => Number.isFinite(d.pnl));
-
-    // hours
-    const hourBuckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, wins: 0, total: 0 }));
-    rows.forEach((r) => {
-      if (!r.trade_time) return;
-      const hh = Number(String(r.trade_time).split(":")[0]);
-      if (!Number.isFinite(hh) || hh < 0 || hh > 23) return;
-      hourBuckets[hh].total += 1;
-      if ((r.pnl ?? 0) > 0) hourBuckets[hh].wins += 1;
-    });
-    const hourData = hourBuckets.map((b) => ({ hour: b.hour, winRate: b.total ? (b.wins / b.total) * 100 : 0, total: b.total }));
-    const bestHour = hourData.reduce(
-      (acc, b) => (b.total > 0 && (b.winRate > acc.winRate || (b.winRate === acc.winRate && b.total > acc.total))) ? b : acc,
-      { hour: null, winRate: -1, total: 0 }
-    );
-
-    // R buckets (planned RR → bucket: 1,2,3,4)
-    const buckets = [1,2,3,4];
-    const rStats = buckets.map(B => {
-      const planned = rows.filter(r => r.plannedRR != null && nearestBucket(r.plannedRR) === B);
-      const trades = planned.length;
-      const wins = planned.filter(r => (r.pnl ?? 0) > 0).length;
-      const winRateB = trades ? (wins / trades) * 100 : 0;
-      const avgRealized = avg(planned.map(r => r.realizedR).filter(x => x != null));
-      const hitOrExceed = planned.filter(r => (r.realizedR ?? -999) >= B).length;
-      return {
-        bucket: B,
-        trades,
-        wins,
-        winRate: winRateB,
-        avgRealizedR: Number.isFinite(avgRealized) ? avgRealized : 0,
-        achievedGE: hitOrExceed,
-      };
-    });
-
-    return { rows, perSymbol, perStrategy, totals, winRate, pieData, barData, hourData, bestHour, rStats };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trades, fxCfg, riskCfg]);
-
-  function nearestBucket(rr) {
-    const B = [1,2,3,4];
-    return B.reduce((a,b) => Math.abs(rr - b) < Math.abs(rr - a) ? b : a, 1);
-  }
-  function avg(arr) {
-    if (!arr?.length) return NaN;
-    const s = arr.reduce((x,y) => x + y, 0);
-    return s / arr.length;
-  }
-
-  /* -------- run actions -------- */
-  async function saveRunMeta() {
-    if (!runId) return;
-    setSavingRun(true);
-    try {
-      const payload = {
-        name: runMeta.name || "TraderLab",
-        initial_capital: runMeta.initial_capital === "" ? 0 : Number(runMeta.initial_capital),
-        notes: runMeta.notes || "",
-      };
-      await api.patch(`/api/journal/backtests/runs/${runId}/`, payload);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to save run.");
-    } finally { setSavingRun(false); }
-  }
-  async function deleteRun() {
-    if (!runId) return;
-    if (!window.confirm('Delete "TraderLab" and ALL its trades? An empty TraderLab run will be recreated.')) return;
-    setDeletingRun(true);
-    try {
-      await api.delete(`/api/journal/backtests/runs/${runId}/`);
-      const res = await api.post("/api/journal/backtests/runs/", { name: "TraderLab" });
-      const newRun = res.data;
-      setRunId(newRun.id);
-      setRunMeta({ name: newRun.name || "TraderLab", initial_capital: String(newRun.initial_capital ?? ""), notes: newRun.notes || "" });
-      setTrades([]);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to delete run.");
-    } finally { setDeletingRun(false); }
-  }
-
-  /* -------- trades / csv / attachments -------- */
-  function onCsvSelected(file) {
-    if (!file) return;
+  function onCsvSelected(file){
+    if(!file) return;
     setCsvFile(file);
-    Papa.parse(file, { header: true, skipEmptyLines: true, complete: (res) => setCsvPreviewRows(res.data || []) });
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: res=>setCsvPreviewRows(res.data||[]),
+      error: ()=>setCsvPreviewRows(null)
+    });
   }
-  async function importCsv() {
-    if (!csvFile || !runId) return;
-    const fd = new FormData();
-    fd.append("file", csvFile);
-    fd.append("run_id", runId);
-    try {
-      await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      await loadTrades(runId);
-      setCsvFile(null);
-      setCsvPreviewRows(null);
-    } catch (e) {
-      console.error(e);
-      alert("Import failed. Check CSV format.");
+
+  async function importCsvIntoCurrent(){
+    if(!csvFile || !accountId) return;
+    setImporting(true);
+    try{
+      const fd = new FormData();
+      fd.append("file", csvFile);
+      fd.append("run_id", String(accountId));
+      fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
+      const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      await loadTrades(accountId);
+      setCsvFile(null); setCsvPreviewRows(null);
+      flash("ok", `CSV imported (${data?.imported ?? 0}/${data?.rows_parsed ?? 0})`);
+    }catch(e){
+      const msg = (e?.response?.data?.detail) ||
+                  (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
+                  "Import failed. Check columns.";
+      window.alert(msg);
+    } finally { setImporting(false); }
+  }
+
+  async function createAccountAndImport(){
+    if(!csvFile) return;
+    const name = window.prompt("New account name (from CSV):", csvFile.name.replace(/\.[^/.]+$/, ""));
+    if(!name) return;
+    try{
+      const {data} = await api.post("/api/journal/backtests/runs/", { name });
+      const newId = String(data.id);
+      setAccountId(newId);
+      try{ localStorage.setItem(LAST_ACCOUNT_KEY, newId); }catch{}
+      const fd = new FormData();
+      fd.append("file", csvFile);
+      fd.append("run_id", newId);
+      fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
+      const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      await loadAccounts(newId);
+      const d = resp?.data||{};
+      flash("ok", `Account created & CSV imported (${d.imported||"?"}/${d.rows_parsed||"?"})`);
+    }catch(e){
+      const msg = (e?.response?.data?.detail) ||
+                  (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
+                  "Could not create account / import.";
+      window.alert(msg);
     }
   }
 
-  async function addTrade(e) {
+  function to24(h,ampm){ let x=Number(h)||0; x=Math.min(Math.max(x,1),12); return (ampm==="AM")?(x===12?0:x):(x===12?12:x+12); }
+  async function addTrade(e){
     e.preventDefault();
-    if (!runId) return;
-    try {
-      const metaBits = [];
-      if (form.stop_price) metaBits.push(`SL: ${form.stop_price}`);
-      if (form.target_price) metaBits.push(`TP: ${form.target_price}`);
-      if (form.strategy) metaBits.push(`STRAT: ${form.strategy}`);
-      metaBits.push("MODE: LIVE");
-      const combinedNotes = [metaBits.join(" | "), form.notes].filter(Boolean).join(" | ");
+    if(!accountId){ window.alert("Pick or create an account first."); return; }
+    try{
+      const hour = to24(form.time_h, form.time_ampm);
+      const trade_time = `${hour<10?"0":""}${hour}:00:00`;
+      const parts = [];
+      if (form.stop_price) parts.push("SL: "+form.stop_price);
+      if (form.target_price) parts.push("TP: "+form.target_price);
+      if (form.strategy) parts.push("STRATEGY: "+form.strategy);
+      parts.push("MODE: LIVE");
+      const meta = parts.join(" | ");
+      const notes = (meta ? meta+" | " : "") + (form.notes||"");
 
-      if (formAttachment) {
+      if (attachFile){
         const fd = new FormData();
-        fd.append("run", runId);
+        fd.append("run", accountId);
         fd.append("date", form.date || new Date().toISOString().slice(0,10));
-        if (form.trade_time) fd.append("trade_time", form.trade_time);
-        fd.append("symbol", (form.symbol || "").toUpperCase());
+        fd.append("trade_time", trade_time);
+        fd.append("symbol", (form.symbol||"").toUpperCase());
         fd.append("direction", form.direction);
-        if (form.size) fd.append("size", form.size);
-        if (form.entry_price) fd.append("entry_price", form.entry_price);
+        if(form.size) fd.append("size", form.size);
+        if(form.entry_price) fd.append("entry_price", form.entry_price);
         fd.append("exit_price", "");
         fd.append("fee", form.fee || 0);
-        fd.append("notes", combinedNotes);
-        fd.append("attachment", formAttachment);
-        await api.post("/api/journal/backtests/trades/", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        fd.append("notes", notes);
+        fd.append("attachment", attachFile);
+        await api.post("/api/journal/backtests/trades/", fd, { headers: { "Content-Type":"multipart/form-data" }});
       } else {
         await api.post("/api/journal/backtests/trades/", {
-          run: Number(runId),
+          run: Number(accountId),
           date: form.date || new Date().toISOString().slice(0,10),
-          trade_time: form.trade_time || null,
-          symbol: (form.symbol || "").toUpperCase(),
+          trade_time,
+          symbol: (form.symbol||"").toUpperCase(),
           direction: form.direction,
-          size: form.size || null,
-          entry_price: form.entry_price || null,
+          size: num(form.size),
+          entry_price: num(form.entry_price),
           exit_price: null,
-          fee: form.fee || 0,
-          notes: combinedNotes,
+          fee: num(form.fee)||0,
+          notes,
         });
       }
-      await loadTrades(runId);
+      await loadTrades(accountId);
       setForm({
-        date:"", trade_time:"", symbol:"", direction:"long", size:"",
-        entry_price:"", stop_price:"", target_price:"", fee:"", notes:"", strategy:"",
+        date:"", time_h:"9", time_ampm:"AM", symbol:"", direction:"long",
+        size:"", entry_price:"", stop_price:"", target_price:"", fee:"",
+        strategy:"", notes:""
       });
-      setFormAttachment(null);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to add trade.");
-    }
+      setAttachFile(null); if(attachRef.current) attachRef.current.value="";
+      flash("ok","Trade saved");
+    }catch(err){ console.error(err); window.alert("Failed to add trade."); }
+  }
+  async function deleteTrade(id){
+    if(!window.confirm("Delete this trade?")) return;
+    try{ await api.delete("/api/journal/backtests/trades/"+id+"/"); await loadTrades(accountId); }catch{ window.alert("Delete failed"); }
+  }
+  async function uploadAttachment(tradeId, file){
+    if(!file) return;
+    const fd=new FormData(); fd.append("attachment", file);
+    try{ await api.patch("/api/journal/backtests/trades/"+tradeId+"/", fd, { headers: { "Content-Type":"multipart/form-data" }}); await loadTrades(accountId); }
+    catch{ window.alert("Upload failed"); }
+  }
+  async function removeAttachment(tradeId){
+    try{ await api.post("/api/journal/backtests/trades/"+tradeId+"/remove-attachment/"); await loadTrades(accountId); }
+    catch{ window.alert("Remove failed"); }
   }
 
-  async function deleteTrade(id) {
-    if (!id || !window.confirm("Delete this trade?")) return;
-    try {
-      await api.delete(`/api/journal/backtests/trades/${id}/`);
-      await loadTrades(runId);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to delete trade.");
-    }
-  }
+  const monthOptions = useMemo(()=>{
+    const set = new Set();
+    (trades||[]).forEach(t=>{
+      if(!t.date) return;
+      const parts = String(t.date).split("-");
+      if(parts.length>=2) set.add(parts[0]+"-"+parts[1]);
+    });
+    return ["all"].concat(Array.from(set).sort().reverse());
+  }, [trades]);
 
-  async function attachFile(tradeId, file) {
-    if (!file || !tradeId) return;
-    setImageUploading(tradeId);
-    try {
-      const fd=new FormData();
-      fd.append("attachment", file);
-      await api.patch(`/api/journal/backtests/trades/${tradeId}/`, fd, { headers: { "Content-Type":"multipart/form-data" } });
-      await loadTrades(runId);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to upload attachment.");
-    } finally {
-      setImageUploading(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
-  async function removeAttachment(tradeId) {
-    try {
-      await api.post(`/api/journal/backtests/trades/${tradeId}/remove-attachment/`);
-      await loadTrades(runId);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to remove attachment.");
-    }
-  }
+  useEffect(()=>{ try { localStorage.setItem(LAST_MONTH_FILTER_KEY, monthFilter); } catch {} }, [monthFilter]);
+  useEffect(()=>{ try { localStorage.setItem(LAST_TZ_KEY, String(tzShift)); } catch {} }, [tzShift]);
+  useEffect(()=>{ if(accountId){ try { localStorage.setItem(pnlMultKey(accountId), String(pnlMult)); } catch {} } }, [pnlMult, accountId]);
+  useEffect(()=>{ if(accountId){ try { localStorage.setItem(acctSizeKey(accountId), String(acctSize)); } catch {} } }, [acctSize, accountId]);
 
-  const selectionBg = hexToRgba(tokens.accent, 0.35);
-  const darkTooltip = {
-    borderRadius: 12,
-    borderColor: tokens.grid,
-    background: "rgba(15,17,21,0.98)",
-    color: "#e5e7eb",
-  };
+  /** ---------- Robust P&L extraction from a trade row ---------- */
+  function pnlOfRaw(t) {
+    // 1) Trusted numeric fields if backend set any of them
+    const fieldCandidates = [
+      "net_pnl","pnl","profit","realized_pnl","realized","gain","p_l","net_pl","netProfit","NetPL","PL"
+    ];
+    for (const key of fieldCandidates) {
+      if (t[key] != null) {
+        const v = toNumberLoose(t[key]);
+        if (v !== null) return v;
+      }
+    }
 
-  /* ---------------- UI ---------------- */
+    // 2) Parse from notes with many label variants
+    const fromNotes = pickFromNotes(t?.notes, [
+      "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS"
+    ]);
+    if (fromNotes !== null) return fromNotes;
+
+    // 3) Compute from prices & size if available
+    const entry = toNumberLoose(t?.entry_price);
+    const exit  = toNumberLoose(t?.exit_price);
+    const size  = toNumberLoose(t?.size);
+    const fee   = toNumberLoose(t?.fee) || 0;
+    if (entry !== null && exit !== null && size !== null) {
+      const dir = (t?.direction || "long").toLowerCase();
+      const delta = dir === "short" ? (entry - exit) : (exit - entry);
+      return delta * size - fee;
+    }
+
+    // 4) Nothing we can use
+    return 0;
+  }
+  const pnlOf = (t)=> pnlOfRaw(t) * (Number.isFinite(pnlMult)?pnlMult:1);
+
+  const stats = useMemo(()=>{
+    const allRows = trades||[];
+    const filtered = monthFilter==="all" ? allRows : allRows.filter(t=> String(t.date||"").startsWith(monthFilter));
+
+    // ---- infer win/loss robustly
+    const withOutcome = filtered.map(t=>{
+      let isWin = t.is_win;
+      if (typeof isWin !== "boolean") {
+        // allow RESULT=WIN/LOSS in notes
+        const res = String(t?.notes || "").match(/RESULT\s*[:=]\s*(WIN|LOSS)/i);
+        if (res) isWin = res[1].toUpperCase() === "WIN";
+      }
+      if (typeof isWin !== "boolean") {
+        const p = pnlOf(t);
+        if (p > 0) isWin = true;
+        else if (p < 0) isWin = false;
+        else isWin = null;
+      }
+      return {...t, __is_win: isWin};
+    });
+
+    const totals = withOutcome.reduce((a,t)=>{
+      const pnl = pnlOf(t);
+      a.net += pnl;
+      if (t.__is_win===true) a.wins++;
+      else if (t.__is_win===false) a.losses++;
+      return a;
+    },{net:0,wins:0,losses:0});
+    const winRate = withOutcome.length ? (totals.wins/withOutcome.length*100) : 0;
+
+    // ---- hour buckets
+    const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0}));
+    withOutcome.forEach(t=>{
+      if(!t.trade_time) return;
+      const hh = Number(String(t.trade_time).split(":")[0]);
+      if(!(hh>=0&&hh<=23)) return;
+      const b = buckets[hh];
+      b.trades += 1;
+      if (hh<12) b.am += 1; else b.pm += 1;
+      if (t.__is_win===true) b.wins += 1;
+    });
+    const hourData = buckets.map(b=> ({
+      hour:b.hour,
+      winRate: b.trades?(b.wins/b.trades*100):0,
+      amTrades: b.am,
+      pmTrades: b.pm,
+    }));
+
+    // ---- top symbols
+    const counts = {};
+    withOutcome.forEach(t=>{ const s=(t.symbol||"—").toUpperCase(); counts[s]=(counts[s]||0)+1; });
+    const pie = Object.keys(counts).map(k=> ({name:k, value:counts[k]})).sort((a,b)=>b.value-a.value).slice(0,12);
+
+    // ---- DOW chart + best day/win%
+    const dow = Array.from({length:7},()=>({trades:0,wins:0,pnl:0}));
+    const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    withOutcome.forEach(t=>{
+      if(!t.date) return;
+      const i = jsDowIndex(t.date);
+      dow[i].trades += 1;
+      if (t.__is_win===true) dow[i].wins += 1;
+      dow[i].pnl += pnlOf(t);
+    });
+    const dowChart = dow.map((d,i)=> ({ name:names[i], trades:d.trades, winRate: d.trades ? (d.wins/d.trades*100) : 0, pnl:d.pnl }));
+    let bestDay = null;
+    for (let i=0;i<dow.length;i++){
+      const wr = dow[i].trades ? (dow[i].wins/dow[i].trades) : 0;
+      if (!bestDay || wr > bestDay.wr) bestDay = { label:names[i], wr: Math.round(wr*100) };
+    }
+
+    const uniqueDays = new Set(withOutcome.map(t=>t.date).filter(Boolean));
+    const avgPerDay = uniqueDays.size ? (totals.net / uniqueDays.size) : 0;
+
+    // ---- journal & flags/mistakes
+    let sumScore = 0, countScore = 0;
+    const flagCounts = {}, mistakeCounts = {};
+    withOutcome.forEach(t=>{
+      const notes = String(t.notes || "");
+      const mV2Score = notes.match(/JRNL_V2:[\s\S]*?SCORE\s*=\s*(\d+)/i);
+      if (mV2Score) { sumScore += Number(mV2Score[1]||0); countScore++; }
+      const mV2Mistakes = notes.match(/MISTAKES\s*=\s*([^\s;|]+)/i);
+      if (mV2Mistakes) {
+        mV2Mistakes[1].split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
+          .forEach(tag=>{ if(tag!=="none") mistakeCounts[tag] = (mistakeCounts[tag]||0)+1; });
+      }
+      const mFlags = notes.match(/JRNL_FLAGS:\s*([^\|]+)/i);
+      if (mFlags) {
+        mFlags[1].split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
+          .forEach(f=>{ if(f!=="none") flagCounts[f] = (flagCounts[f]||0) + 1; });
+      }
+    });
+    const avgJournal = countScore ? Math.round(sumScore / countScore) : 0;
+
+    const topFlags = Object.keys(flagCounts).map(k=>({key:k, count:flagCounts[k]})).sort((a,b)=>b.count-a.count).slice(0,3);
+    const topMistakes = Object.keys(mistakeCounts).map(k=>({key:k, count:mistakeCounts[k]})).sort((a,b)=>b.count-a.count).slice(0,5);
+
+    return { filtered: withOutcome, totals, winRate, pie, hourData, avgJournal, topFlags, topMistakes, dowChart, bestDay, avgPerDay };
+  }, [trades, monthFilter, pnlMult]);
+
+  /* ---------- UI ---------- */
   return (
     <div className="p-4 md:p-6 space-y-6">
-      {/* brand selection color */}
-      <style>{`::selection { background: ${selectionBg}; }`}</style>
-
-      {/* Header */}
-      <header className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+      <header className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold text-neutral-100">TraderLab</h1>
-          <div className="text-xs" style={{ color: tokens.muted }}>
-            trades: {trades.length} • symbols: {derived.perSymbol.length}
+          <h1 className="text-xl md:text-2xl font-semibold">TraderLab (Live)</h1>
+          <div className="text-xs" style={{color:tokens.muted}}>
+            trades: {stats.filtered ? stats.filtered.length : 0} • wins: {stats.totals.wins} • losses: {stats.totals.losses} • win rate: {stats.winRate.toFixed(1)}%
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <label
-            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 cursor-pointer border text-neutral-200 hover:text-neutral-100"
-            style={{ borderColor: tokens.grid }}
+        <div className="flex flex-wrap gap-2 items-center">
+          <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} onClick={createAccount}>New Account</button>
+
+          {/* slimmer account selects */}
+          <select
+            className="qe-select text-sm"
+            value={accountId}
+            onChange={async (e)=>{ const id=e.target.value; setAccountId(id); try{localStorage.setItem(LAST_ACCOUNT_KEY,id);}catch{} if(id) await loadTrades(id); else setTrades([]); }}
+            title="Select account"
+            style={{minWidth: 260}}
           >
-            <span className="text-sm">Upload CSV</span>
-            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=>onCsvSelected(e.target.files?.[0])}/>
-            {csvPreviewRows
-              ? <span className="text-xs" style={{color:tokens.muted}}>preview ready → Import</span>
-              : <span className="text-xs" style={{color:tokens.muted}}>preview before import</span>}
+            {(accounts||[]).map(a=> <option key={a.id} value={a.id}>{a.name || ("Acc "+a.id)}</option>)}
+            {(!accounts||accounts.length===0) && <option value="">No accounts</option>}
+          </select>
+
+          <select
+            className="qe-select text-sm"
+            value={monthFilter}
+            onChange={(e)=>setMonthFilter(e.target.value)}
+            title="Filter by month"
+          >
+            {monthOptions.map(opt=> <option key={opt} value={opt}>{opt==="all" ? "All months" : opt}</option>)}
+          </select>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{color:tokens.muted}}>P&L ×</label>
+            <input
+              className="qe-field"
+              style={{ width: 70 }}
+              type="number"
+              step="1"
+              value={pnlMult}
+              onChange={(e)=> setPnlMult(Number(e.target.value||1))}
+              title="Multiply all computed P&L by this factor (set 100 if your CSV is in cents/pips)"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs" style={{color:tokens.muted}}>Account size</label>
+            <input
+              className="qe-field"
+              style={{ width: 110 }}
+              type="number"
+              step="0.01"
+              value={acctSize}
+              onChange={(e)=> setAcctSize(Number(e.target.value||0))}
+              title="Starting account balance for this run"
+            />
+          </div>
+
+          <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>setShowMgr(true)}>Manage</button>
+
+          <label className="px-3 py-2 rounded-lg border text-sm cursor-pointer" style={{borderColor:tokens.grid}}>
+            Upload CSV
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e)=> onCsvSelected(e.target.files && e.target.files[0])}/>
           </label>
-          {csvPreviewRows && (
-            <button onClick={importCsv} className="px-3 py-2 text-sm rounded-xl"
-              style={{ background: tokens.primary, color: "white" }}>
-              Import to TraderLab
-            </button>
-          )}
         </div>
       </header>
 
-      {/* Stats */}
-      <div className="grid gap-3 md:grid-cols-4">
-        <SummaryCard label="Net P&L" value={fmtMoney(derived.totals.net)} accent={tokens.primary}/>
-        <SummaryCard label="Fees" value={fmtMoney(derived.totals.fee)} accent={tokens.secondary}/>
-        <SummaryCard label="Win Rate" value={`${derived.winRate.toFixed(1)}%`} accent={tokens.accent}/>
-        <SummaryCard label="# Trades" value={trades.length} accent={tokens.info}/>
+      {notice && (
+        <div
+          className="rounded-lg px-3 py-2 text-sm"
+          style={ notice.type==="ok"
+            ? {background:"rgba(16,185,129,.12)", color:"#10b981", border:"1px solid rgba(16,185,129,.3)"}
+            : {background:"rgba(239,68,68,.12)", color:"#ef4444", border:"1px solid rgba(239,68,68,.3)"} }
+        >
+          {notice.text}
+        </div>
+      )}
+
+      {/* CSV preview actions */}
+      {csvPreviewRows && (
+        <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <div className="font-medium">CSV Preview (first {Math.min(200,csvPreviewRows.length)} rows)</div>
+            <div className="flex items-center gap-2">
+              <select
+                className="qe-select text-sm"
+                value={tzShift}
+                onChange={(e)=>setTzShift(Number(e.target.value))}
+                title="Apply this hour shift to timestamps while importing"
+              >
+                {TZ_CHOICES.map(z=> <option key={String(z.value)} value={z.value}>{z.label}</option>)}
+              </select>
+              <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} disabled={importing} onClick={importCsvIntoCurrent}>{importing?"Importing…":"Import to Account"}</button>
+              <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={createAccountAndImport}>Create Account & Import</button>
+              <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>Discard</button>
+            </div>
+          </div>
+          <CsvPreview rows={csvPreviewRows}/>
+          <div className="text-xs mt-2" style={{color:tokens.muted}}>Uses the same flexible headers as Backtesting.</div>
+        </div>
+      )}
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-8 gap-3">
+        <KPI label="# Trades" value={stats.filtered ? stats.filtered.length : 0}/>
+        <KPI label="Wins" value={stats.totals.wins}/>
+        <KPI label="Losses" value={stats.totals.losses}/>
+        <KPI label="Net P&L" value={money(stats.totals.net)}/>
+        <KPI label="Avg Journal Score" value={stats.avgJournal || 0}/>
+        <KPI label="Best Day (Win%)" value={stats.bestDay ? (stats.bestDay.label + " • " + stats.bestDay.wr + "%") : "—"}/>
+        <KPI label="Account Size" value={money(acctSize)}/>
+        <KPI label="Balance" value={money(acctSize + stats.totals.net)}/>
       </div>
 
-      {/* Main two-column: left controls / right charts */}
+      {/* charts row */}
       <div className="grid gap-4 md:grid-cols-3">
-        {/* LEFT */}
-        <div className="space-y-4">
-          {/* Run settings */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm" style={{ color: tokens.muted }}>Run Settings</div>
-              <div className="flex gap-2">
-                <IconButton title={savingRun?"Saving…":"Save run"} onClick={saveRunMeta} style={{borderColor:tokens.grid}}>
-                  <SaveIcon color={tokens.primary}/>
-                </IconButton>
-                <IconButton title={deletingRun?"Deleting…":"Delete run"} onClick={deleteRun} style={{borderColor:tokens.grid}}>
-                  <TrashIcon color={tokens.danger}/>
-                </IconButton>
-              </div>
-            </div>
-            <Input label="Name" value={runMeta.name} onChange={(v)=>setRunMeta(m=>({...m,name:v}))} tokens={tokens}/>
-            <Input label="Initial Capital" type="number" value={runMeta.initial_capital} onChange={(v)=>setRunMeta(m=>({...m,initial_capital:v}))} tokens={tokens}/>
-            <div className="mt-2">
-              <label className="text-xs" style={{ color: tokens.muted }}>Notes</label>
-              <textarea
-                className="w-full rounded-xl px-3 py-2 border focus:outline-none"
-                style={{
-                  borderColor: hexToRgba(tokens.accent, 0.35),
-                  background: hexToRgba(tokens.accent, 0.10),
-                  color: tokens.accent,
-                }}
-                rows={3}
-                value={runMeta.notes}
-                onChange={(e)=>setRunMeta(m=>({...m,notes:e.target.value}))}
-              />
-            </div>
+        <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
+          <div className="text-sm mb-2" style={{color:tokens.muted}}>Top Symbols (by trades)</div>
+          <div style={{height:220}}>
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={stats.pie} dataKey="value" nameKey="name" innerRadius={48} outerRadius={95} paddingAngle={2}>
+                  {stats.pie.map((_,i)=><Cell key={i} stroke="#0b1220" strokeWidth={1} fill={tokens.charts[i%tokens.charts.length]} />)}
+                </Pie>
+                <ReTooltip contentStyle={{ borderRadius:12, background:"#0b1220", border:"1px solid "+tokens.grid, color:"#e5edf7" }}/>
+              </PieChart>
+            </ResponsiveContainer>
           </div>
-
-          {/* FX Assist + Presets */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid, background: hexToRgba(tokens.accent, 0.04) }}>
-            <div className="text-sm mb-2" style={{ color: tokens.muted }}>FX P&L Assist</div>
-            <div className="flex items-center gap-2 mb-2">
-              <input id="fxEnabled" type="checkbox" checked={fxCfg.enabled} onChange={e=>setFxCfg(c=>({...c,enabled:e.target.checked}))}/>
-              <label htmlFor="fxEnabled" className="text-sm">Enable pip-based P&L for FX symbols</label>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Select
-                label="FX Preset"
-                value={fxCfg.preset}
-                onChange={(v)=>setFxCfg(c=>({...c,preset:v}))}
-                options={FX_PRESETS.map(p=>({label:p.label, value:p.code}))}
-                tokens={tokens}
-              />
-              <Input label="Pip $ per lot" value={fxCfg.pipUSD} onChange={(v)=>setFxCfg(c=>({...c,pipUSD:v}))} tokens={tokens}/>
-              <Select label="Size Units" value={fxCfg.sizeIsLots ? "lots" : "units"} onChange={(v)=>setFxCfg(c=>({...c,sizeIsLots:v==="lots"}))}
-                options={[{label:"Lots (std 100k)", value:"lots"},{label:"Units", value:"units"}]} tokens={tokens}/>
-            </div>
-            <div className="text-xs mt-2" style={{ color: tokens.muted }}>
-              Example: EURUSD 1.16443→1.16500, 1.0 lot, $10/pip ≈ +$5.7 per 0.00057 move (minus fees).
-            </div>
-          </div>
-
-          {/* Risk config & helpers */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-            <div className="text-sm mb-2" style={{ color: tokens.muted }}>Risk & R-Multiples</div>
-            <div className="grid grid-cols-2 gap-2">
-              <Input label="Risk $ per trade" value={riskCfg.riskPerTradeUSD} onChange={(v)=>setRiskCfg(c=>({...c,riskPerTradeUSD:v}))} tokens={tokens}/>
-              <Input label="Per-point $ (non-FX)" value={riskCfg.perPointUSD} onChange={(v)=>setRiskCfg(c=>({...c,perPointUSD:v}))} tokens={tokens}/>
-            </div>
-            <div className="text-xs mt-2" style={{ color: tokens.muted }}>
-              1R is computed from Entry↔Stop × per-point (or FX pip value) × size. Expectancy & “closed early” are based on realized R.
-            </div>
-          </div>
-
-          {/* Add Trade */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-            <div className="font-medium mb-2 text-neutral-100">Add Trade</div>
-            <form className="grid md:grid-cols-2 gap-2" onSubmit={addTrade}>
-              <Input label="Date" type="date" value={form.date} onChange={(v)=>setForm(f=>({...f,date:v}))} tokens={tokens}/>
-              <Input label="Time" type="time" value={form.trade_time} onChange={(v)=>setForm(f=>({...f,trade_time:v}))} tokens={tokens}/>
-              <Input label="Symbol" value={form.symbol} onChange={(v)=>setForm(f=>({...f,symbol:v}))} placeholder="AAPL / EURUSD" tokens={tokens}/>
-              <Select label="Direction" value={form.direction} onChange={(v)=>setForm(f=>({...f,direction:v}))}
-                options={[{label:"Long",value:"long"},{label:"Short",value:"short"}]} tokens={tokens}/>
-              <Input label={`Size (${fxCfg.sizeIsLots ? "lots" : "units"})`} value={form.size} onChange={(v)=>setForm(f=>({...f,size:v}))} tokens={tokens}/>
-              <Input label="Entry" value={form.entry_price} onChange={(v)=>setForm(f=>({...f,entry_price:v}))} tokens={tokens}/>
-              <Input label="Stop" value={form.stop_price} onChange={(v)=>setForm(f=>({...f,stop_price:v}))} tokens={tokens}/>
-              <Input label="Target" value={form.target_price} onChange={(v)=>setForm(f=>({...f,target_price:v}))} tokens={tokens}/>
-
-              {/* R pills + size suggest */}
-              <div className="md:col-span-2 flex flex-wrap gap-2 items-center">
-                <span className="text-xs" style={{ color: tokens.muted }}>Set target:</span>
-                {[1,2,3,4].map(r=>(
-                  <button key={r} type="button" className="px-2 py-1 rounded-lg text-xs border"
-                          onClick={()=>ratioTarget(r)}
-                          style={{ borderColor: tokens.grid, background: hexToRgba(tokens.accent,0.08), color: tokens.accent }}>
-                    {r}:1
-                  </button>
-                ))}
-                <span className="mx-1 text-xs" style={{ color: tokens.muted }}>•</span>
-                <button type="button" className="px-2 py-1 rounded-lg text-xs border text-neutral-200 hover:text-neutral-100"
-                        onClick={suggestSizeFromRisk}
-                        style={{ borderColor: tokens.grid }}>
-                  Suggest size from Risk$
-                </button>
-              </div>
-
-              <Input label="Fee" value={form.fee} onChange={(v)=>setForm(f=>({...f,fee:v}))} tokens={tokens}/>
+          <div className="mt-3 text-xs" style={{color:tokens.muted}}>
+            {(stats.topFlags?.length) || (stats.topMistakes?.length) ? (
               <div>
-                <label className="text-xs" style={{ color: tokens.muted }}>Strategy</label>
-                <input
-                  className="w-full rounded-xl px-3 py-2 border focus:outline-none"
-                  list="strategy-presets"
-                  style={{
-                    borderColor: hexToRgba(tokens.accent, 0.35),
-                    background: hexToRgba(tokens.accent, 0.10),
-                    color: tokens.accent,
-                  }}
-                  value={form.strategy}
-                  onChange={(e)=>setForm(f=>({...f,strategy:e.target.value}))}
-                  placeholder="Breakout / Pullback / Range / News…"
-                />
-                <datalist id="strategy-presets">
-                  {["Breakout","Pullback","Trend Continuation","Range Reversal","News","Scalp","Swing","S/R Bounce","Mean Revert"].map(s=>
-                    <option key={s} value={s} />
-                  )}
-                </datalist>
+                {stats.topMistakes?.length ? (
+                  <>
+                    <div className="font-medium mb-1" style={{color:"#e5edf7"}}>Top mistakes</div>
+                    <ul className="list-disc" style={{marginLeft:20, marginBottom:8}}>
+                      {stats.topMistakes.map(f=> <li key={f.key}>{f.key} ({f.count})</li>)}
+                    </ul>
+                  </>
+                ) : null}
+                {stats.topFlags?.length ? (
+                  <>
+                    <div className="font-medium mb-1" style={{color:"#e5edf7"}}>Discipline flags</div>
+                    <ul className="list-disc" style={{marginLeft:20}}>
+                      {stats.topFlags.map(f=> <li key={f.key}>{f.key} ({f.count})</li>)}
+                    </ul>
+                  </>
+                ) : null}
               </div>
-
-              <div className="md:col-span-2">
-                <label className="text-xs" style={{ color: tokens.muted }}>Notes</label>
-                <textarea
-                  className="w-full rounded-xl px-3 py-2 border focus:outline-none"
-                  style={{
-                    borderColor: hexToRgba(tokens.accent, 0.35),
-                    background: hexToRgba(tokens.accent, 0.10),
-                    color: tokens.accent,
-                  }}
-                  rows={2}
-                  value={form.notes}
-                  onChange={(e)=>setForm(f=>({...f,notes:e.target.value}))}
-                />
-              </div>
-              <div>
-                <label className="text-xs" style={{ color: tokens.muted }}>Attachment (optional)</label>
-                <input type="file" accept="image/*,application/pdf" onChange={(e)=>setFormAttachment(e.target.files?.[0]||null)}/>
-              </div>
-              <div className="flex items-end">
-                <button className="px-3 py-2 text-sm rounded-xl" style={{ background: tokens.primary, color: "white" }} type="submit">
-                  Add Trade
-                </button>
-              </div>
-            </form>
+            ) : <span>No issues yet.</span>}
           </div>
-
-          {/* Journal panel (embedded, compact) */}
-          <JournalPanel compact />
         </div>
 
-        {/* RIGHT */}
-        <div className="md:col-span-2 space-y-4">
-          {/* charts row: small pie + big bar */}
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-              <div className="text-sm text-neutral-400">Profit Share</div>
-              <div className="text-xs mb-1" style={{ color: hexToRgba(tokens.muted, 0.9) }}>
-                {derived.pieData.length === 0 ? "No positive P&L yet — equal slices shown." : "Share of P&L (abs)."}
-              </div>
-              <div className="w-full" style={{ height: 220 }}>
-                <ResponsiveContainer>
-                  <PieChart>
-                    <Pie data={derived.pieData} dataKey="value" nameKey="name" outerRadius={90} innerRadius={42} paddingAngle={2}>
-                      {derived.pieData.map((_, i) => (
-                        <Cell key={i} stroke="rgba(255,255,255,0.08)" strokeWidth={1} fill={tokens.charts[i % tokens.charts.length]} />
-                      ))}
-                    </Pie>
-                    <ReTooltip contentStyle={darkTooltip} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            <div className="md:col-span-2 border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-              <div className="text-sm mb-2 text-neutral-400">P&L by Symbol</div>
-              <div style={{ height: 220 }}>
-                <ResponsiveContainer>
-                  <BarChart data={derived.barData}>
-                    <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
-                    <XAxis dataKey="symbol" stroke="#9ca3af" />
-                    <YAxis stroke="#9ca3af" />
-                    <ReTooltip formatter={(v) => fmtMoney(v)} contentStyle={darkTooltip} />
-                    <Bar dataKey="pnl">
-                      {derived.barData.map((d, i) => (
-                        <Cell key={i} fill={d.pnl >= 0 ? tokens.success : tokens.danger} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+        <div className="rounded-xl border p-3 md:col-span-2" style={{borderColor:tokens.grid}}>
+          <div className="text-sm mb-2" style={{color:tokens.muted}}>Win % and AM/PM Trades by Hour</div>
+          <div style={{height:220}}>
+            <ResponsiveContainer>
+              <BarChart data={stats.hourData}>
+                <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
+                <XAxis dataKey="hour" tickFormatter={(h)=>String(h).padStart(2,"0")} stroke={tokens.muted}/>
+                <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
+                <YAxis yAxisId="right" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
+                <Legend wrapperStyle={{ color: tokens.muted }} />
+                <ReTooltip
+                  contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
+                  formatter={(value, name)=>{
+                    if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
+                    return [value, name];
+                  }}
+                  labelFormatter={(h)=> "Hour " + String(h).padStart(2,"0") + ":00" }
+                />
+                <Bar name="Win %" dataKey="winRate" yAxisId="left">
+                  {stats.hourData.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
+                </Bar>
+                <Bar name="AM Trades" dataKey="amTrades" yAxisId="right" fill="#94a3b8" />
+                <Bar name="PM Trades" dataKey="pmTrades" yAxisId="right" fill="#60a5fa" />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-
-          {/* hours */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-neutral-400">Trading Hours (win%)</div>
-              <div className="text-xs" style={{ color: tokens.muted }}>
-                Best hour: {derived.bestHour.hour === null ? "—" : `${String(derived.bestHour.hour).padStart(2,"0")}:00–${String((derived.bestHour.hour+1)%24).padStart(2,"0")}:00`}
-                {derived.bestHour.hour !== null && ` • ${derived.bestHour.winRate.toFixed(0)}% on ${derived.bestHour.total} trades`}
-              </div>
-            </div>
-            <div style={{ height: 200 }}>
-              <ResponsiveContainer>
-                <BarChart data={derived.hourData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" tickFormatter={(h) => String(h).padStart(2,"0")} stroke="#9ca3af" />
-                  <YAxis domain={[0,100]} tickFormatter={(v)=>`${v}%`} stroke="#9ca3af" />
-                  <ReTooltip formatter={(v,n,p)=>[`${(v ?? 0).toFixed?.(0) ?? v}%`, `${String(p?.payload?.hour).padStart(2,"0")}:00`]} contentStyle={darkTooltip} />
-                  <Bar dataKey="winRate">
-                    {(derived.hourData||[]).map((d,i)=>{
-                      const rate=d.winRate||0; let color=tokens.danger;
-                      if (rate>=80) color=tokens.success; else if (rate>=60) color="#facc15"; else if (rate>=40) color="#f97316";
-                      return <Cell key={i} fill={color} />;
-                    })}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* R bucket table */}
-          <RBucketsTable rows={derived.rStats} tokens={tokens} />
-
-          {/* per-strategy table */}
-          <PerStrategyTable data={derived.perStrategy} tokens={tokens} />
-
-          {/* CSV preview */}
-          {csvPreviewRows && (
-            <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-              <div className="flex items-center justify-between mb-2">
-                <div className="font-medium text-neutral-100">CSV Preview</div>
-                <div className="flex gap-2">
-                  <button className="text-sm px-3 py-2 rounded-xl" style={{ background: tokens.primary, color:"white" }} onClick={importCsv}>
-                    Import to TraderLab
-                  </button>
-                  <button className="text-sm px-3 py-2 rounded-xl border text-neutral-200 hover:text-neutral-100" style={{ borderColor: tokens.grid }}
-                    onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>
-                    Discard Preview
-                  </button>
-                </div>
-              </div>
-              <CsvPreviewTable rows={csvPreviewRows} tokens={tokens}/>
-            </div>
-          )}
-
-          {/* per-symbol table */}
-          <PerSymbolTable data={derived.perSymbol} loading={loading} tokens={tokens} />
-
-          {/* trades table */}
-          <div className="border rounded-2xl p-3" style={{ borderColor: tokens.grid }}>
-            <div className="font-medium mb-2 text-neutral-100">Trades</div>
-            <div className="overflow-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b" style={{ borderColor: tokens.grid }}>
-                    <Th tokens={tokens}>Date</Th>
-                    <Th tokens={tokens}>Time</Th>
-                    <Th tokens={tokens}>Symbol</Th>
-                    <Th tokens={tokens}>Side</Th>
-                    <Th tokens={tokens}>Size</Th>
-                    <Th tokens={tokens}>Entry</Th>
-                    <Th tokens={tokens}>Stop</Th>
-                    <Th tokens={tokens}>Target</Th>
-                    <Th tokens={tokens}>Fee</Th>
-                    <Th tokens={tokens}>P&L</Th>
-                    <Th tokens={tokens}>Planned R</Th>
-                    <Th tokens={tokens}>Realized R</Th>
-                    <Th tokens={tokens}>Outcome</Th>
-                    <Th tokens={tokens}>Strategy</Th>
-                    <Th tokens={tokens}>Chart</Th>
-                    <Th tokens={tokens}>Attach</Th>
-                    <Th tokens={tokens}></Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {derived.rows.map(r=>{
-                    const bg = rowBgs(tokens);
-                    return (
-                      <tr key={r.id} className="border-b align-top"
-                          style={{ borderColor: tokens.grid, background: bg.base, transition: "background-color 120ms ease" }}
-                          onMouseEnter={(e)=>e.currentTarget.style.background=bg.hover}
-                          onMouseLeave={(e)=>e.currentTarget.style.background=bg.base}>
-                        <Td>{r.date ? new Date(`${r.date}T00:00:00`).toLocaleDateString() : "—"}</Td>
-                        <Td>{r.trade_time ? r.trade_time.slice(0,5) : "—"}</Td>
-                        <Td>{r.symbol}</Td>
-                        <Td>
-                          <span className="px-2 py-1 rounded-full text-xs font-medium"
-                            style={{
-                              background: hexToRgba(r.direction==="short"?tokens.danger:tokens.success,0.12),
-                              color: r.direction==="short"?tokens.danger:tokens.success,
-                              border: `1px solid ${hexToRgba(r.direction==="short"?tokens.danger:tokens.success,0.2)}`
-                            }}>
-                            {String(r.direction||"").toUpperCase()}
-                          </span>
-                        </Td>
-                        <Td>{r.size ?? "—"}</Td>
-                        <Td>{r.entry ?? "—"}</Td>
-                        <Td>{r.sl ?? "—"}</Td>
-                        <Td>{r.tp ?? "—"}</Td>
-                        <Td>{fmtMoney(r.fee)}</Td>
-                        <Td style={{ color: r.pnl>=0 ? tokens.success : tokens.danger }}>{fmtMoney(r.pnl)}</Td>
-                        <Td>{r.plannedRR!=null ? `${r.plannedRR.toFixed(2)}:1` : "—"}</Td>
-                        <Td>{r.realizedR!=null ? `${r.realizedR.toFixed(2)}R` : "—"}</Td>
-                        <Td>{r.outcome}</Td>
-                        <Td>{r.strategy}</Td>
-                        <Td>
-                          {r.attachment ? (
-                            r.attachment.match(/\.(png|jpg|jpeg|webp|gif)$/i)
-                              ? <a href={r.attachment} target="_blank" rel="noreferrer"><img src={r.attachment} alt="" className="h-12 w-12 object-cover rounded-lg" style={{border:`1px solid ${tokens.grid}`}}/></a>
-                              : <a className="underline" href={r.attachment} target="_blank" rel="noreferrer">View file</a>
-                          ) : <span className="text-xs" style={{color:tokens.muted}}>None</span>}
-                          {r.attachment && (
-                            <div>
-                              <button className="text-xs underline mt-1" onClick={()=>removeAttachment(r.id)}>Remove</button>
-                            </div>
-                          )}
-                        </Td>
-                        <Td>
-                          <label className="text-xs px-2 py-1 rounded-lg cursor-pointer inline-flex items-center gap-1 border text-neutral-200 hover:text-neutral-100" style={{ borderColor: tokens.grid }}>
-                            {imageUploading===r.id?"Uploading…":"Upload"}
-                            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e)=>attachFile(r.id,e.target.files?.[0])}/>
-                          </label>
-                        </Td>
-                        <Td>
-                          <button
-                            className="text-xs px-2 py-1 rounded-lg border"
-                            style={{ borderColor: tokens.grid, color: tokens.danger, background: hexToRgba(tokens.danger, 0.06) }}
-                            onClick={()=>deleteTrade(r.id)}
-                          >
-                            Delete
-                          </button>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                  {derived.rows.length===0 && (
-                    <tr>
-                      <td className="py-4" style={{ color: tokens.muted }} colSpan={17}>
-                        {loading ? "Loading…" : "No trades yet."}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
       </div>
+
+      {/* Best Day + P&L by Day */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-xl border p-3 md:col-span-2" style={{borderColor:tokens.grid}}>
+          <div className="text-sm mb-2" style={{color:tokens.muted}}>Best Day to Trade (Win% & Trades)</div>
+          <div style={{height:220}}>
+            <ResponsiveContainer>
+              <BarChart data={stats.dowChart}>
+                <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
+                <XAxis dataKey="name" stroke={tokens.muted}/>
+                <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
+                <YAxis yAxisId="right" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
+                <Legend wrapperStyle={{ color: tokens.muted }} />
+                <ReTooltip
+                  contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
+                  formatter={(value, name)=>{
+                    if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
+                    if (name === "Trades") return [value, "Trades"];
+                    return [value, name];
+                  }}
+                />
+                <Bar name="Win %" dataKey="winRate" yAxisId="left">
+                  {stats.dowChart.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
+                </Bar>
+                <Bar name="Trades" dataKey="trades" yAxisId="right" fill="#60a5fa" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
+          <div className="text-sm mb-2 flex items-center justify-between" style={{color:tokens.muted}}>
+            <span>P&L by Day</span>
+            <span className="text-xs">Avg/day: <span style={{color:"#e5edf7"}}>{money(stats.avgPerDay)}</span></span>
+          </div>
+          <div className="space-y-2">
+            {stats.dowChart.map(d=>(
+              <div key={d.name} className="flex items-center justify-between text-sm">
+                <span>{d.name}</span>
+                <span style={{color: (d.pnl>=0?tokens.success:tokens.danger)}}>{money(d.pnl)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Lot size panel (same trades for consistency) */}
+      <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
+
+      {/* Journal + Add trade */}
+      <div className="grid md:grid-cols-3 gap-4">
+        <div className="md:col-span-2">
+          <JournalPanel compact runId={accountId} />
+        </div>
+
+        <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
+          <div className="font-medium mb-3">Add Trade (Live)</div>
+          <form onSubmit={addTrade} className="grid grid-cols-1 gap-3">
+            <Input label="Date" type="date" value={form.date} onChange={(v)=>updateForm({date:v})}/>
+            <div className="grid grid-cols-3 gap-3">
+              <Select label="Hour" value={form.time_h} onChange={(v)=>updateForm({time_h:v})}
+                      options={Array.from({length:12},(_,i)=>({label:String(i+1), value:String(i+1)}))}/>
+              <Select label="AM/PM" value={form.time_ampm} onChange={(v)=>updateForm({time_ampm:v})}
+                      options={[{label:"AM",value:"AM"},{label:"PM",value:"PM"}]}/>
+              <Select label="Side" value={form.direction} onChange={(v)=>updateForm({direction:v})}
+                      options={[{label:"Long",value:"long"},{label:"Short",value:"short"}]}/>
+            </div>
+
+            <Input label="Symbol" value={form.symbol} onChange={(v)=>updateForm({symbol:v})} placeholder="XAUUSD / EURUSD / AAPL"/>
+            <div className="grid grid-cols-3 gap-3">
+              <Input label="Size" value={form.size} onChange={(v)=>updateForm({size:v})} placeholder="0.01 lots or shares"/>
+              <Input label="Entry" value={form.entry_price} onChange={(v)=>updateForm({entry_price:v})}/>
+              <Input label="Fee" value={form.fee} onChange={(v)=>updateForm({fee:v})} placeholder="0"/>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <Input label="Stop (SL)" value={form.stop_price} onChange={(v)=>updateForm({stop_price:v})}/>
+              <Input label="Target (TP)" value={form.target_price} onChange={(v)=>updateForm({target_price:v})}/>
+              <Input label="Strategy" value={form.strategy} onChange={(v)=>updateForm({strategy:v})} placeholder="Breakout A"/>
+            </div>
+
+            <div>
+              <label className="text-xs" style={{color:tokens.muted}}>Notes</label>
+              <textarea className="qe-field mt-1" rows={2} value={form.notes} onChange={(e)=>updateForm({notes:e.target.value})}/>
+            </div>
+
+            <div>
+              <label className="text-xs" style={{color:tokens.muted}}>Attachment (optional)</label>
+              <input ref={attachRef} type="file" accept="image/*,application/pdf" onChange={(e)=>setAttachFile((e.target.files && e.target.files[0]) ? e.target.files[0] : null)}/>
+            </div>
+
+            <button className="px-4 py-2 rounded-lg text-white w-full" style={{background:tokens.primary}} type="submit">Add Trade</button>
+          </form>
+        </div>
+      </div>
+
+      {/* trades table — compact & professional */}
+      <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
+        <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
+        <div className="overflow-auto">
+          <table className="min-w-full text-[13px]" style={{tableLayout:"fixed"}}>
+            <thead>
+              <tr className="text-left border-b" style={{borderColor:tokens.grid}}>
+                <Th style={{width:50}}>#</Th>
+                <Th style={{width:110}}>Date</Th>
+                <Th style={{width:70}}>Time</Th>
+                <Th style={{width:120}}>Symbol</Th>
+                <Th style={{width:80}}>Side</Th>
+                <Th style={{width:90}}>Size</Th>
+                <Th style={{width:90}}>Fee</Th>
+                <Th style={{width:110}}>P&L</Th>
+                <Th style={{width:90}}>Journal</Th>
+                <Th style={{width:150}}>Mistakes</Th>
+                <Th style={{width:130}}>Strategy</Th>
+                <Th style={{width:90}}>Notes</Th>
+                <Th style={{width:110}}>Attachment</Th>
+                <Th style={{width:90}}>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {(stats.filtered||[]).map((t,idx)=>{
+                const stratM = (t.notes||"").match(/STRATEGY:\s*([^|]+)/i);
+                const stratTxt = stratM && stratM[1] ? stratM[1].trim() : "";
+                const jScoreV2 = (t.notes||"").match(/JRNL_V2:[\s\S]*?SCORE\s*=\s*(\d+)/i);
+                const jScoreLegacy = (t.notes||"").match(/JRNL_SCORE:\s*(\d+)/i);
+                const jScore = jScoreV2 ? jScoreV2[1] : (jScoreLegacy ? jScoreLegacy[1] : null);
+                const mCsv = (t.notes||"").match(/MISTAKES\s*=\s*([^\s;|]+)/i);
+                const mistakes = mCsv && mCsv[1] && mCsv[1].toLowerCase()!=="none"
+                  ? mCsv[1].split(",").map(s=>s.trim()).filter(Boolean)
+                  : [];
+                const pnl = pnlOf(t);
+                const rowNo = stats.filtered.length - idx;
+                const openNotes = () => {
+                  setNotesTitle(`#${t.id} • ${t.symbol || "—"} • ${t.date || "—"} ${t.trade_time?.slice(0,5)||""}`);
+                  setNotesContent(t.notes || "");
+                  setNotesOpen(true);
+                };
+                return (
+                  <tr key={t.id} className="border-b align-top"
+                      style={{borderColor:tokens.grid, background:rgba("#0ea5e9",0.045)}}
+                      onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.085);}}
+                      onMouseLeave={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.045);}}>
+                    <Td><span className="px-2 py-0.5 text-[11px] rounded-md" style={{background:"#1f2937", color:"#d1d5db"}} title={"Trade id "+t.id}>{rowNo}</span></Td>
+                    <Td>{t.date ? new Date(String(t.date)+"T00:00:00").toLocaleDateString() : "—"}</Td>
+                    <Td>{t.trade_time ? String(t.trade_time).slice(0,5) : "—"}</Td>
+                    <Td className="truncate" title={t.symbol || ""}>{t.symbol}</Td>
+                    <Td>
+                      <span className="px-1.5 py-0.5 text-[11px] rounded-md"
+                            style={{background: t.direction==="short"?rgba(tokens.danger,.15):rgba(tokens.success,.15),
+                                    color: t.direction==="short"?tokens.danger:tokens.success}}>
+                        {String(t.direction||"").toUpperCase()}
+                      </span>
+                    </Td>
+                    <Td>{t.size ?? "—"}</Td>
+                    <Td>{money(t.fee)}</Td>
+                    <Td style={{color:(pnl>=0)?tokens.success:tokens.danger, fontWeight:600}}>{money(pnl)}</Td>
+
+                    <Td>{jScore ? <span title="Discipline Score">{jScore}</span> : <span style={{color:tokens.muted}}>—</span>}</Td>
+                    <Td>
+                      {mistakes.length
+                        ? <div className="flex flex-wrap gap-1" style={{maxWidth:220}}>{mistakes.map(m=>(
+                            <span key={m} className="px-1.5 py-0.5 border rounded-md text-[11px]" style={{borderColor:tokens.grid}}>{m}</span>
+                          ))}</div>
+                        : <span style={{color:tokens.muted}}>—</span>}
+                    </Td>
+
+                    <Td className="truncate" title={stratTxt}>{stratTxt || "—"}</Td>
+
+                    {/* Compact Notes: button opens modal */}
+                    <Td>
+                      {(t.notes && t.notes.trim())
+                        ? <button
+                            className="px-2 py-1 text-xs rounded-md border"
+                            style={{borderColor:tokens.grid}}
+                            onClick={openNotes}
+                          >View</button>
+                        : <span style={{color:tokens.muted}}>—</span>}
+                    </Td>
+
+                    <Td>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs px-2 py-1 rounded-lg border cursor-pointer inline-block text-center" style={{borderColor:tokens.grid}}>
+                          Upload
+                          <input type="file" className="hidden" accept="image/*,application/pdf" onChange={(e)=>uploadAttachment(t.id, (e.target.files && e.target.files[0]) || null)}/>
+                        </label>
+                        {t.attachment ? (
+                          /\.(png|jpg|jpeg|webp|gif)$/i.test(t.attachment)
+                            ? <a className="text-xs underline text-center" href={t.attachment} target="_blank" rel="noreferrer">view</a>
+                            : <a className="text-xs underline text-center" href={t.attachment} target="_blank" rel="noreferrer">file</a>
+                        ) : <span className="text-xs text-center" style={{color:tokens.muted}}>—</span>}
+                        {t.attachment && <button className="text-xs underline text-center" onClick={()=>removeAttachment(t.id)}>Remove</button>}
+                      </div>
+                    </Td>
+                    <Td>
+                      <button className="px-2 py-1 text-xs rounded-lg border"
+                              style={{borderColor:tokens.grid, color:tokens.danger, background:rgba(tokens.danger,0.06)}}
+                              onClick={()=>deleteTrade(t.id)}>Delete</button>
+                    </Td>
+                  </tr>
+                );
+              })}
+              {(!stats.filtered || stats.filtered.length===0) && (
+                <tr><td className="py-4" style={{color:tokens.muted}} colSpan={14}>{loading?"Loading…":"No trades yet."}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Account Manager (slimmer) */}
+      {showMgr && (
+        <AccountManager
+          accounts={accounts}
+          selectedId={accountId}
+          onClose={()=>setShowMgr(false)}
+          onSelect={async (id)=>{
+            setAccountId(String(id));
+            try{localStorage.setItem(LAST_ACCOUNT_KEY,String(id));}catch{}
+            await loadTrades(String(id));
+            try{
+              setPnlMult(Number(localStorage.getItem(pnlMultKey(id))||1));
+              setAcctSize(Number(localStorage.getItem(acctSizeKey(id))||0));
+            }catch{}
+          }}
+          onRename={renameAccount}
+          onDelete={deleteAccount}
+        />
+      )}
+
+      {/* Notes Modal */}
+      {notesOpen && (
+        <NotesModal
+          title={notesTitle}
+          content={notesContent}
+          onClose={()=>setNotesOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-/* ---------------- small UI bits ---------------- */
-function SummaryCard({label,value,accent}) {
+/* ------------ UI atoms (safe/simple) ------------ */
+function KPI(props){
   return (
-    <div className="rounded-2xl p-3"
-         style={{ border:`1px solid ${hexToRgba(accent,0.25)}`, background:hexToRgba(accent,0.06) }}>
-      <div className="text-xs" style={{ color: hexToRgba(accent,0.9) }}>{label}</div>
-      <div className="text-lg font-semibold mt-1 text-neutral-100">{value}</div>
+    <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
+      <div className="text-xs" style={{color:tokens.muted}}>{props.label}</div>
+      <div className="text-lg font-semibold mt-1">{props.value}</div>
     </div>
   );
 }
-function Th({ children, tokens }) {
-  return <th className="py-2 pr-4 text-xs font-semibold" style={{ color: tokens.muted }}>{children}</th>;
+function Th(props){
+  return <th className="py-2 pr-3 text-[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
 }
-function Td({ children, className = "" }) {
-  return <td className={`py-2 pr-4 ${className}`}>{children}</td>;
+function Td(props){
+  return <td className={"py-1.5 pr-3 "+(props.className||"")}>{props.children}</td>;
 }
-function Input({ label, value, onChange, type = "text", placeholder, tokens }) {
+
+function Input(props){
+  const handleChange = React.useCallback((e)=>{
+    if (props.onChange) props.onChange(e.target.value);
+  }, [props.onChange]);
+
   return (
-    <div>
-      <label className="text-xs" style={{ color: tokens.muted }}>{label}</label>
+    <div className={props.className || ""}>
+      <label className="text-xs" style={{color:tokens.muted}}>{props.label}</label>
       <input
-        className="w-full rounded-xl px-3 py-2 border focus:outline-none"
-        style={{
-          borderColor: hexToRgba(tokens.accent, 0.35),
-          background: hexToRgba(tokens.accent, 0.10),
-          color: tokens.accent,
-        }}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        className="qe-field mt-1"
+        type={props.type || "text"}
+        value={props.value}
+        onChange={handleChange}
+        placeholder={props.placeholder}
       />
     </div>
   );
 }
-function Select({ label, value, onChange, options, tokens }) {
+
+function Select(props){
+  const handleChange = React.useCallback((e)=>{
+    if (props.onChange) props.onChange(e.target.value);
+  }, [props.onChange]);
+
   return (
-    <div>
-      <label className="text-xs" style={{ color: tokens.muted }}>{label}</label>
-      <select
-        className="w-full rounded-xl px-3 py-2 border focus:outline-none"
-        style={{
-          borderColor: hexToRgba(tokens.accent, 0.35),
-          background: hexToRgba(tokens.accent, 0.10),
-          color: tokens.accent,
-        }}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    <div className={props.className || ""}>
+      <label className="text-xs" style={{color:tokens.muted}}>{props.label}</label>
+      <select className="qe-select mt-1" value={props.value} onChange={handleChange}>
+        {props.options.map(o=> <option key={String(o.value)} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   );
 }
-function CsvPreviewTable({ rows, tokens }) {
-  if (!rows?.length) return <div className="text-xs" style={{ color: tokens.muted }}>Empty</div>;
+
+function CsvPreview(props){
+  const rows = props.rows || [];
+  if (!rows.length) return <div className="text-xs" style={{color:tokens.muted}}>Empty</div>;
   const headers = Object.keys(rows[0] || {});
   return (
     <div className="overflow-auto">
       <table className="min-w-full text-sm">
         <thead>
-          <tr className="text-left border-b" style={{ borderColor: tokens.grid }}>
-            {headers.map(h => <th key={h} className="py-2 pr-4">{h}</th>)}
+          <tr className="text-left border-b" style={{borderColor:tokens.grid}}>
+            {headers.map(h=> <th key={h} className="py-2 pr-4 text-xs" style={{color:tokens.muted}}>{h}</th>)}
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, 200).map((row, i) => {
-            const bg = rowBgs(tokens);
-            return (
-              <tr key={i} className="border-b"
-                  style={{ borderColor: tokens.grid, background: bg.base, transition: "background-color 120ms ease" }}
-                  onMouseEnter={(e)=>e.currentTarget.style.background = bg.hover}
-                  onMouseLeave={(e)=>e.currentTarget.style.background = bg.base}>
-                {headers.map(h => (
-                  <td key={h} className="py-2 pr-4 whitespace-nowrap">{String(row[h] ?? "")}</td>
-                ))}
-              </tr>
-            );
-          })}
+          {rows.slice(0,200).map((row,i)=>(
+            <tr key={i} className="border-b" style={{borderColor:tokens.grid, background:rgba("#06b6d4",0.06)}}
+                onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#06b6d4",0.12);}}
+                onMouseLeave={(e)=>{e.currentTarget.style.background=rgba("#06b6d4",0.06);}}>
+              {headers.map(h=> <td key={h} className="py-2 pr-4 whitespace-nowrap">{String(row[h] ?? "")}</td>)}
+            </tr>
+          ))}
         </tbody>
       </table>
-      {rows.length>200 && <div className="text-xs mt-2" style={{ color: tokens.muted }}>Showing first 200 rows…</div>}
+      {rows.length>200 && <div className="text-xs mt-2" style={{color:tokens.muted}}>Showing first 200 rows…</div>}
     </div>
   );
 }
-function PerSymbolTable({ data, loading, tokens }) {
+
+/* ---- slimmer Account Manager ---- */
+function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}){
   return (
-    <div className="rounded-2xl p-3" style={{ border: `1px solid ${tokens.grid}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-medium text-neutral-100">Per-Symbol Breakdown</div>
-      </div>
-      <div className="overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left border-b" style={{ borderColor: tokens.grid }}>
-              <Th tokens={tokens}>Symbol</Th>
-              <Th tokens={tokens}># Trades</Th>
-              <Th tokens={tokens}>Wins</Th>
-              <Th tokens={tokens}>Losses</Th>
-              <Th tokens={tokens}>Win %</Th>
-              <Th tokens={tokens}>Net P&L</Th>
-              <Th tokens={tokens}>Avg P&L</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((r) => {
-              const bg = rowBgs(tokens);
-              return (
-                <tr key={r.symbol} className="border-b"
-                    style={{ borderColor: tokens.grid, background: bg.base, transition: "background-color 120ms ease" }}
-                    onMouseEnter={(e)=>e.currentTarget.style.background=bg.hover}
-                    onMouseLeave={(e)=>e.currentTarget.style.background=bg.base}>
-                  <Td>{r.symbol}</Td>
-                  <Td>{r.trades}</Td>
-                  <Td>{r.wins}</Td>
-                  <Td>{r.losses}</Td>
-                  <Td>{r.winRate.toFixed(1)}%</Td>
-                  <Td style={{ color: r.netPnL >= 0 ? tokens.success : tokens.danger }}>{fmtMoney(r.netPnL)}</Td>
-                  <Td>{fmtMoney(r.avgPnL)}</Td>
-                </tr>
-              );
-            })}
-            {data.length === 0 && (
-              <tr>
-                <td className="py-4" style={{ color: tokens.muted }} colSpan={7}>
-                  {loading ? "Loading…" : "No data yet."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="rounded-xl border p-4 w-full max-w-sm bg-[#0b1220]" style={{borderColor:tokens.grid}}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-medium">Accounts</div>
+          <button className="text-xs underline" onClick={onClose}>Close</button>
+        </div>
+        <div className="space-y-2 max-h-[60vh] overflow-auto">
+          {(accounts||[]).map(a=>(
+            <div key={a.id} className="flex items-center justify-between gap-2 py-1">
+              <button className="text-left flex-1 underline truncate"
+                      style={{color: String(selectedId)===String(a.id) ? "#e5edf7" : tokens.muted}}
+                      title={a.name || ("Acc "+a.id)}
+                      onClick={()=>onSelect(a.id)}>
+                {a.name || ("Acc "+a.id)}
+              </button>
+              <div className="flex items-center gap-2">
+                <button className="text-xs underline" onClick={()=>onRename(a.id)}>Rename</button>
+                <button className="text-xs underline" style={{color:tokens.danger}} onClick={()=>onDelete(a.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+          {(!accounts || accounts.length===0) && <div className="text-xs" style={{color:tokens.muted}}>No accounts yet.</div>}
+        </div>
       </div>
     </div>
   );
 }
-function PerStrategyTable({ data, tokens }) {
+
+/* ---- Notes Modal ---- */
+function NotesModal({ title, content, onClose }){
+  const copy = () => {
+    try { navigator.clipboard.writeText(content || ""); } catch {}
+  };
   return (
-    <div className="rounded-2xl p-3" style={{ border: `1px solid ${tokens.grid}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-medium text-neutral-100">Per-Strategy Breakdown</div>
-        <div className="text-xs" style={{ color: tokens.muted }}>Win% and Avg R by strategy</div>
-      </div>
-      <div className="overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left border-b" style={{ borderColor: tokens.grid }}>
-              <Th tokens={tokens}>Strategy</Th>
-              <Th tokens={tokens}>Trades</Th>
-              <Th tokens={tokens}>Wins</Th>
-              <Th tokens={tokens}>Win %</Th>
-              <Th tokens={tokens}>Avg R</Th>
-              <Th tokens={tokens}>Net P&L</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data||[]).map((r,i)=>{
-              const bg = rowBgs(tokens);
-              return (
-                <tr key={i} className="border-b"
-                    style={{ borderColor: tokens.grid, background: bg.base }}
-                    onMouseEnter={(e)=>e.currentTarget.style.background = hexToRgba(tokens.accent, 0.12)}
-                    onMouseLeave={(e)=>e.currentTarget.style.background = bg.base}>
-                  <Td>{r.strategy}</Td>
-                  <Td>{r.trades}</Td>
-                  <Td>{r.wins}</Td>
-                  <Td>{r.winRate.toFixed(1)}%</Td>
-                  <Td>{Number(r.avgR).toFixed(2)}R</Td>
-                  <Td style={{ color: r.netPnL >= 0 ? tokens.success : tokens.danger }}>{fmtMoney(r.netPnL)}</Td>
-                </tr>
-              );
-            })}
-            {(!data || data.length===0) && (
-              <tr>
-                <td className="py-4" style={{ color: tokens.muted }} colSpan={6}>No strategy data yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-function RBucketsTable({ rows, tokens }) {
-  return (
-    <div className="rounded-2xl p-3" style={{ border: `1px solid ${tokens.grid}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="font-medium text-neutral-100">Win% by Planned R:R</div>
-        <div className="text-xs" style={{ color: tokens.muted }}>Counts based on planned R bucket (1,2,3,4)</div>
-      </div>
-      <div className="overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left border-b" style={{ borderColor: tokens.grid }}>
-              <Th tokens={tokens}>Planned R</Th>
-              <Th tokens={tokens}>Trades</Th>
-              <Th tokens={tokens}>Wins</Th>
-              <Th tokens={tokens}>Win %</Th>
-              <Th tokens={tokens}>Avg Realized R</Th>
-              <Th tokens={tokens}>Achieved ≥ R</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {(rows||[]).map(r=>{
-              const bg = rowBgs(tokens);
-              return (
-                <tr key={r.bucket} className="border-b"
-                    style={{ borderColor: tokens.grid, background: bg.base }}
-                    onMouseEnter={(e)=>e.currentTarget.style.background = hexToRgba(tokens.accent, 0.12)}
-                    onMouseLeave={(e)=>e.currentTarget.style.background = bg.base}>
-                  <Td>{r.bucket}:1</Td>
-                  <Td>{r.trades}</Td>
-                  <Td>{r.wins}</Td>
-                  <Td>{r.winRate.toFixed(1)}%</Td>
-                  <Td>{r.avgRealizedR.toFixed(2)}R</Td>
-                  <Td>{r.achievedGE}</Td>
-                </tr>
-              );
-            })}
-            {(!rows || rows.length===0) && (
-              <tr><td className="py-4" style={{ color: tokens.muted }} colSpan={6}>No R bucket data.</td></tr>
-            )}
-          </tbody>
-        </table>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-2xl bg-[#0b1220] rounded-xl border" style={{borderColor:tokens.grid}}>
+        <div className="p-3 md:p-4 border-b" style={{borderColor:tokens.grid}}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-medium truncate" title={title}>{title || "Notes"}</div>
+            <div className="flex items-center gap-2">
+              <button className="px-2 py-1 text-xs rounded-md border" style={{borderColor:tokens.grid}} onClick={copy}>Copy</button>
+              <button className="px-2 py-1 text-xs rounded-md border" style={{borderColor:tokens.grid}} onClick={onClose}>Close</button>
+            </div>
+          </div>
+        </div>
+        <div className="p-3 md:p-4">
+          <pre className="whitespace-pre-wrap text-sm leading-6" style={{color:"#e5edf7"}}>{content || "—"}</pre>
+        </div>
       </div>
     </div>
   );

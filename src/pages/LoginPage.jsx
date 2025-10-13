@@ -5,13 +5,8 @@ import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 
 /**
- * Professional landing+login:
- * - Left: hero, value props, webinar schedule, PTB funded challenges banner, socials row, CTAs
- * - Right: compact Sign In card
- *
- * Webinar data is local for now — update the WEBINARS array below, or later load from API.
+ * Marketing + Login page
  */
-
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -20,16 +15,8 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // --- Simple local webinar schedule (edit freely) ---
-  const WEBINARS = useMemo(
-    () => [
-      // { date: "2025-10-10", time: "7:00 PM ET", title: "Market Prep + Q&A (FX/Gold)", level: "Open" },
-      // { date: "2025-10-17", time: "7:00 PM ET", title: "Consistency & Process Deep Dive", level: "Members" },
-    ],
-    []
-  );
+  const WEBINARS = useMemo(() => [], []);
 
-  // --- Affiliate banner link ---
   const PTB_URL =
     "https://dashboard.plutustradebase.com/challenges?affiliateId=quantumedge.fx";
 
@@ -38,13 +25,21 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
-      // ✅ build /api/users/token/
-      const res = await apiNoAuth.post(apiPath("users/token/"), { username, password });
+      // Support username OR email
+      const looksLikeEmail = /\S+@\S+\.\S+/.test(username);
+      const payload = looksLikeEmail
+        ? { email: username, password }
+        : { username, password };
+
+      // Use helper to guarantee /api/users/token/
+      const res = await apiNoAuth.post(apiPath("users/token/"), payload);
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
+
       localStorage.setItem("access", access);
       localStorage.setItem("refresh", refresh);
-      const dest = location.state?.from?.pathname || "/";
+
+      const dest = location.state?.from?.pathname || "/traderlab";
       navigate(dest);
     } catch (err) {
       console.error("login failed", err);
@@ -63,9 +58,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen px-4 md:px-6 lg:px-8 py-8">
       <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-7">
-        {/* LEFT: Hero / value / webinars / PTB / socials / CTAs */}
+        {/* LEFT */}
         <section className="space-y-6">
-          {/* Hero */}
           <div className="rounded-2xl p-6 md:p-7 border border-white/10 bg-[color:var(--card,#0A0F16)]">
             <div className="flex items-center gap-3 mb-3">
               <img src={logo} alt="QuantumEdge" className="h-9" />
@@ -74,27 +68,17 @@ export default function LoginPage() {
               </h1>
             </div>
             <p className="text-sm md:text-base text-neutral-400 leading-relaxed">
-              QuantumEdge brings together <span className="text-neutral-200">TraderLab</span>, journaling, P&amp;L analytics,
-              psych profile, watchlists, charts, and the FX calendar—designed to help you repeat what works.
+              QuantumEdge brings together <span className="text-neutral-200">TraderLab</span>, journaling,
+              analytics, psych profile, charts, and the FX calendar—designed to help you repeat what works.
             </p>
 
-            {/* Value props */}
             <div className="grid sm:grid-cols-2 gap-3 mt-5">
-              <ValueCard title="TraderLab">
-                Backtests, attachments, R-multiples, expectancy, hour-of-day win%.
-              </ValueCard>
-              <ValueCard title="Psych Profile">
-                Archetype quiz + guided prompts to reduce impulsive errors.
-              </ValueCard>
-              <ValueCard title="Webinars">
-                Weekly topics &amp; Q&amp;A with recordings when available.
-              </ValueCard>
-              <ValueCard title="Courses">
-                Self-paced strategy and psychology drills for consistency.
-              </ValueCard>
+              <ValueCard title="TraderLab">P&amp;L + hour-of-day win%, attachments, notes.</ValueCard>
+              <ValueCard title="Psych Profile">Archetype quiz + prompts to reduce impulsive errors.</ValueCard>
+              <ValueCard title="Webinars">Weekly topics &amp; Q&amp;A (recordings as available).</ValueCard>
+              <ValueCard title="Courses">Strategy and psychology drills for consistency.</ValueCard>
             </div>
 
-            {/* Primary CTAs */}
             <div className="mt-6 flex flex-wrap items-center gap-3">
               <Link
                 to="/register"
@@ -112,10 +96,8 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Webinar Schedule (optional) */}
           <WebinarSchedule items={WEBINARS} />
 
-          {/* PTB funded challenges banner */}
           <a
             href={PTB_URL}
             target="_blank"
@@ -146,7 +128,6 @@ export default function LoginPage() {
             </div>
           </a>
 
-          {/* Socials row (aligned, consistent) */}
           <SocialRow />
         </section>
 
@@ -160,7 +141,7 @@ export default function LoginPage() {
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <FormField
-                label="Username"
+                label="Username or Email"
                 autoComplete="username"
                 value={username}
                 onChange={setUsername}

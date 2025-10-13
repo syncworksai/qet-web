@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api/axios";
 
-/* ---------------- color tokens (match TraderLab/Backtesting) ---------------- */
+/* ---------------- color tokens ---------------- */
 function readCssVar(name) {
   if (typeof window === "undefined") return "";
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -11,7 +11,7 @@ function fallbackTokens() {
   return {
     primary: "#4f46e5",
     secondary: "#7c3aed",
-    accent: "#06b6d4",   // teal
+    accent: "#06b6d4",
     success: "#10b981",
     danger: "#ef4444",
     warning: "#f59e0b",
@@ -45,7 +45,7 @@ function useColorTokens() {
   return tokens;
 }
 
-/* ---------------- small inputs that keep the teal background ---------------- */
+/* ---------------- small inputs ---------------- */
 function Input({ label, value, onChange, type = "text", placeholder, tokens }) {
   return (
     <div>
@@ -85,7 +85,7 @@ function Select({ label, value, onChange, options, tokens }) {
   );
 }
 
-/* ---------------- Add Alert Modal (non-white background) ---------------- */
+/* ---------------- Add Alert Modal ---------------- */
 function AddAlertModal({ open, symbol, onClose, onSubmit, tokens }) {
   const [dir, setDir] = useState("above");
   const [price, setPrice] = useState("");
@@ -100,18 +100,8 @@ function AddAlertModal({ open, symbol, onClose, onSubmit, tokens }) {
   const selectionBg = hexToRgba(tokens.accent, 0.35);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      aria-modal
-      role="dialog"
-    >
-      {/* backdrop */}
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.45)" }}
-        onClick={onClose}
-      />
-      {/* card */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center" aria-modal role="dialog">
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.45)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-md rounded-2xl p-4 border"
         style={{ borderColor: tokens.grid, background: hexToRgba(tokens.accent, 0.06) }}
@@ -186,6 +176,46 @@ function AddAlertModal({ open, symbol, onClose, onSubmit, tokens }) {
   );
 }
 
+/* ---------------- helpers for symbol/type ---------------- */
+function normalizeSymbol(s = "") {
+  return String(s).toUpperCase().replace(/\s+/g, "").replace("/", "");
+}
+
+/** Keep types aligned with the chart resolver */
+function inferType(symbol = "") {
+  const s = normalizeSymbol(symbol);
+
+  // Metals & energy common spot tickers (we route via OANDA/FOREXCOM in the chart)
+  if (["XAUUSD", "XAGUSD", "XTIUSD", "XBRUSD"].includes(s)) return "forex";
+
+  // 6-letter forex pairs
+  if (/^[A-Z]{6}$/.test(s)) return "forex";
+
+  // Crypto
+  if (/(USDT|USDC)$/.test(s) || /^(BTC|ETH|SOL|XRP|DOGE|ADA)$/.test(s)) return "crypto";
+
+  // Indices
+  if (["SPX","NDX","DJI","DAX","UK100","NAS100"].includes(s)) return "index";
+
+  return "stock";
+}
+
+/* ---------------- storage helpers (fallback if API unavailable) ---------------- */
+const LS_KEY = "qe_watchlist";
+
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return arr;
+  } catch { return null; }
+}
+function saveToLocalStorage(list) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(list || [])); } catch {}
+}
+
 /* ---------------- Watchlist ---------------- */
 export default function Watchlist({ onSelectSymbol }) {
   const tokens = useColorTokens();
@@ -195,31 +225,47 @@ export default function Watchlist({ onSelectSymbol }) {
   const [adding, setAdding] = useState(false);
   const [newSymbol, setNewSymbol] = useState("");
   const [alertModal, setAlertModal] = useState({ open: false, symbol: null });
+  const [error, setError] = useState("");
 
   const selectionBg = hexToRgba(tokens.accent, 0.35);
 
+  // Initial load: try backend, else localStorage fallback
   useEffect(() => {
     let ok = true;
     (async () => {
       try {
         setLoading(true);
-        // Try your backend; gracefully fall back to demo data
+        setError("");
         let data = [];
         try {
           const res = await api.get("/api/market/watchlist/");
           data = res.data || [];
-        } catch {
-          data = [
+        } catch (e) {
+          // Fallback to localStorage if API fails
+          const ls = loadFromLocalStorage();
+          data = ls ?? [
             { symbol: "AAPL", asset_type: "stock" },
             { symbol: "NVDA", asset_type: "stock" },
             { symbol: "EURUSD", asset_type: "forex" },
-            { symbol: "BTCUSD", asset_type: "crypto" },
+            { symbol: "BTCUSDT", asset_type: "crypto" },
+            { symbol: "XAUUSD", asset_type: "forex" },
           ];
         }
-        if (ok) setItems(data);
+        // normalize
+        const normalized = (data || []).map(x => ({
+          symbol: normalizeSymbol(x.symbol),
+          asset_type: x.asset_type || inferType(x.symbol),
+        }));
+        if (ok) {
+          setItems(normalized);
+          saveToLocalStorage(normalized);
+        }
       } catch (e) {
         console.error("load watchlist failed", e);
-        if (ok) setItems([]);
+        if (ok) {
+          setItems([]);
+          setError("Failed to load watchlist.");
+        }
       } finally {
         if (ok) setLoading(false);
       }
@@ -227,46 +273,69 @@ export default function Watchlist({ onSelectSymbol }) {
     return () => { ok = false; };
   }, []);
 
+  // De-dupe helper
+  function exists(sym) {
+    const s = normalizeSymbol(sym);
+    return items.some(it => normalizeSymbol(it.symbol) === s);
+  }
+
   async function addSymbol() {
-    const s = (newSymbol || "").trim().toUpperCase();
-    if (!s) return;
+    const input = normalizeSymbol(newSymbol);
+    if (!input) return;
+    if (exists(input)) {
+      setError(`${input} is already in your watchlist.`);
+      return;
+    }
+    const entry = { symbol: input, asset_type: inferType(input) };
+
     try {
       setAdding(true);
-      // Try to persist; if endpoint differs, adjust here
-      try { await api.post("/api/market/watchlist/", { symbol: s }); } catch {}
-      setItems(prev => ([...prev, { symbol: s, asset_type: inferType(s) }]));
+      setError("");
+      // Optimistic UI
+      setItems(prev => {
+        const next = [...prev, entry];
+        saveToLocalStorage(next);
+        return next;
+      });
+      // Best-effort persist to backend
+      try { await api.post("/api/market/watchlist/", entry); } catch {}
       setNewSymbol("");
     } catch (e) {
       console.error(e);
+      setError("Failed to add symbol.");
     } finally {
       setAdding(false);
     }
   }
 
   async function removeSymbol(symbol) {
+    const s = normalizeSymbol(symbol);
     try {
-      // Try to persist; if endpoint differs, adjust here
-      try { await api.delete(`/api/market/watchlist/${encodeURIComponent(symbol)}/`); } catch {}
-      setItems(prev => prev.filter(x => String(x.symbol).toUpperCase() !== String(symbol).toUpperCase()));
+      setItems(prev => {
+        const next = prev.filter(x => normalizeSymbol(x.symbol) !== s);
+        saveToLocalStorage(next);
+        return next;
+      });
+      try { await api.delete(`/api/market/watchlist/${encodeURIComponent(s)}/`); } catch {}
     } catch (e) {
       console.error(e);
+      setError("Failed to remove symbol.");
     }
   }
 
   function openAlert(symbol) {
-    setAlertModal({ open: true, symbol });
+    setAlertModal({ open: true, symbol: normalizeSymbol(symbol) });
   }
 
   async function saveAlert({ symbol, dir, price, note }) {
+    const s = normalizeSymbol(symbol);
     try {
-      // Adjust endpoint/shape to your backend
       try {
         await api.post("/api/market/alerts/", {
-          symbol,
+          symbol: s,
           condition: dir,
           price: Number(price),
           note: note || "",
-          // delivery: "inapp", // if you support
         });
       } catch {}
       setAlertModal({ open: false, symbol: null });
@@ -277,23 +346,27 @@ export default function Watchlist({ onSelectSymbol }) {
   }
 
   const rows = useMemo(() => {
-    return (items || []).map(it => ({
-      key: `${it.symbol}:${it.asset_type || "—"}`,
-      symbol: it.symbol,
-      type: it.asset_type || inferType(it.symbol),
-    }));
+    return (items || []).map(it => {
+      const sym = normalizeSymbol(it.symbol);
+      return {
+        key: `${sym}:${it.asset_type || "—"}`,
+        symbol: sym,
+        type: it.asset_type || inferType(sym),
+      };
+    });
   }, [items]);
 
   return (
     <div className="rounded-2xl p-4" style={{ border:`1px solid ${tokens.grid}` }}>
       <style>{`::selection { background: ${selectionBg}; }`}</style>
+
       <div className="flex items-center justify-between mb-3">
         <div className="font-semibold">Watchlist</div>
         <div className="flex gap-2">
           <Input
             value={newSymbol}
-            onChange={setNewSymbol}
-            placeholder="Add symbol (AAPL, EURUSD)"
+            onChange={(v)=>{ setNewSymbol(v); setError(""); }}
+            placeholder="Add symbol (AAPL, XAUUSD, EURUSD)"
             tokens={tokens}
           />
           <button
@@ -306,6 +379,13 @@ export default function Watchlist({ onSelectSymbol }) {
           </button>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-2 text-xs rounded-lg px-2 py-1"
+             style={{ color: tokens.danger, background: hexToRgba(tokens.danger, 0.08), border:`1px solid ${hexToRgba(tokens.danger,0.35)}` }}>
+          {error}
+        </div>
+      )}
 
       <div className="overflow-auto">
         <table className="min-w-full text-sm">
@@ -326,17 +406,20 @@ export default function Watchlist({ onSelectSymbol }) {
                 onMouseLeave={(e)=>e.currentTarget.style.background = "transparent"}
               >
                 <td className="py-2 pr-4">
-                  <button
-                    className="underline-offset-2"
-                    style={{ color: tokens.accent }}
-                    onClick={() => onSelectSymbol && onSelectSymbol({ symbol: r.symbol, asset_type: r.type })}
-                  >
-                    {r.symbol}
-                  </button>
+                  <span style={{ color: tokens.accent }}>{r.symbol}</span>
                 </td>
                 <td className="py-2 pr-4 uppercase">{r.type}</td>
                 <td className="py-2 pr-4">
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {/* NEW: View Chart button */}
+                    <button
+                      className="px-2 py-1 rounded-lg text-xs border"
+                      style={{ borderColor: tokens.grid, background: hexToRgba(tokens.accent, 0.10), color: tokens.accent }}
+                      onClick={() => onSelectSymbol && onSelectSymbol({ symbol: r.symbol, asset_type: r.type })}
+                      title={`Open ${r.symbol} chart`}
+                    >
+                      View Chart
+                    </button>
                     <button
                       className="px-2 py-1 rounded-lg text-xs border"
                       style={{ borderColor: tokens.grid }}
@@ -366,7 +449,7 @@ export default function Watchlist({ onSelectSymbol }) {
         </table>
       </div>
 
-      {/* Alert modal (teal card, no white) */}
+      {/* Alert modal */}
       <AddAlertModal
         open={alertModal.open}
         symbol={alertModal.symbol}
@@ -376,13 +459,4 @@ export default function Watchlist({ onSelectSymbol }) {
       />
     </div>
   );
-}
-
-/* ---------------- helpers ---------------- */
-function inferType(symbol = "") {
-  const s = String(symbol).toUpperCase().trim();
-  if (/^[A-Z]{3}\/?[A-Z]{3}$/.test(s)) return "forex";
-  if (/^BTC|ETH|SOL|DOGE|USDT|USDC|XRP/.test(s)) return "crypto";
-  if (/^CL|GC|NG|SI|ZC|ZS|ZW|ES|NQ|YM/.test(s)) return "futures";
-  return "stock";
 }

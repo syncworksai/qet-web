@@ -1,0 +1,3 @@
+await api.post("/api/journal/backtests/import_csv/", formData, {
+  headers: { "Content-Type": "multipart/form-data" }
+});

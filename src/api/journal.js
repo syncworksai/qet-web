@@ -1,20 +1,19 @@
 // src/api/journal.js
 import { api } from "./axios";
 
-// join paths safely
+// Safe join
 function j(path) {
   if (!path.startsWith("/")) path = "/" + path;
   return path.replace(/\/{2,}/g, "/");
 }
 
-/* ---------------- Backtests: Runs ---------------- */
+/* ---------------- Runs ---------------- */
 export async function listBacktestRuns() {
   const { data } = await api.get(j("/api/journal/backtests/runs/"));
   return data;
 }
 
 export async function createBacktestRun(payload) {
-  // payload: { name, initial_capital, notes }
   const { data } = await api.post(j("/api/journal/backtests/runs/"), payload);
   return data;
 }
@@ -24,16 +23,13 @@ export async function fetchBacktestRunAnalytics(runId) {
   return data;
 }
 
-/* ---------------- Backtests: Trades ---------------- */
+/* ---------------- Trades ---------------- */
 export async function getBacktestTrades(runId) {
-  const { data } = await api.get(j(`/api/journal/backtests/trades/`), {
-    params: { run: runId },
-  });
+  const { data } = await api.get(j(`/api/journal/backtests/trades/`), { params: { run: runId } });
   return data;
 }
 
 export async function addBacktestTrade(runId, tradePayload, fileOrNull) {
-  // tradePayload: { date, symbol, direction, entry_price, exit_price, size, fee, notes }
   const form = new FormData();
   Object.entries({ ...tradePayload, run: runId }).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") form.append(k, v);
@@ -51,19 +47,22 @@ export async function deleteBacktestTrade(tradeId) {
   return true;
 }
 
-/* ---------------- CSV Upload (server ingests into a run) ---------------- */
-export async function uploadBacktestCSV(file, runId = null) {
+/* ---------------- CSV Upload used by TraderLab ---------------- */
+export async function uploadBacktestCSV(file, runId = null, tzShiftHours = 0) {
   const form = new FormData();
   form.append("file", file);
-  if (runId != null) form.append("run", String(runId));
+  if (runId != null) form.append("run_id", String(runId));
+  form.append("tz_shift_hours", String(tzShiftHours || 0));
 
-  const { data } = await api.post(j(`/api/journal/backtests/upload_csv/`), form, {
+  const { data } = await api.post(j(`/api/journal/backtests/import_csv/`), form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
-  return data;
+  return data; // {imported, rows_parsed, ...}
 }
 
-/* ---------------- High-level analytics alias ---------------- */
-export async function fetchBacktestAnalytics(runId) {
-  return fetchBacktestRunAnalytics(runId);
+/* ---------------- Journal-only save ---------------- */
+export async function saveTradeJournal(tradeId, payload) {
+  // POST /api/journal/backtests/trades/<id>/journal/
+  const { data } = await api.post(j(`/api/journal/backtests/trades/${tradeId}/journal/`), payload);
+  return data;
 }

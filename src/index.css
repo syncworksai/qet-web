@@ -14,3 +14,40 @@
 html, body, #root { height:100%; }
 body { background:var(--bg); color:var(--text); }
 a { color: var(--accent); }
+/***** QE Pro look helpers *****/
+.chart-chip { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; padding: 2px 8px; }
+.chart-card { background: #0b0f17; border: 1px solid #1f2937; border-radius: 16px; }
+/* ---- QuantumEdge dark field defaults ---- */
+:root {
+  --qe-muted: #9aa8bd;
+}
+
+.qe-field {
+  width: 100%;
+  border: 1px solid #263245;
+  background: #0f1828;
+  color: #e5edf7;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.qe-field::placeholder { color: #6d7a8f; }
+
+.qe-select {
+  width: 100%;
+  border: 1px solid #263245;
+  background: #0f1828;
+  color: #e5edf7;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.75rem;
+  appearance: none;
+}
+
+/* Options in dark select dropdowns */
+.qe-select option {
+  background: #0f1828;
+  color: #e5edf7;
+}
+
+/* Buttons/labels baseline */
+button, .border { border-color: #263245; }

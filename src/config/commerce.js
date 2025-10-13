@@ -1,6 +1,6 @@
 // src/config/commerce.js
 // Central place for Stripe links + Social profiles.
-// You can keep these defaults or override any of them with Vite envs.
+// Values can be overridden via Vite envs at build time.
 
 export const STRIPE_ALL_LINK =
   import.meta.env.VITE_STRIPE_PAYMENT_LINK_ALL ||
@@ -22,7 +22,7 @@ export const PAYLINKS = {
   app: import.meta.env.VITE_PAYLINK_APP || "",
 };
 
-// Social profiles (your provided links)
+// Social profiles (official links)
 export const SOCIAL = {
   youtube:
     import.meta.env.VITE_SOCIAL_YT ||
@@ -36,4 +36,10 @@ export const SOCIAL = {
   facebook:
     import.meta.env.VITE_SOCIAL_FB ||
     "https://www.facebook.com/profile.php?id=61579183787818",
+
+  // Community links (optional – used elsewhere on the site)
+  discord: import.meta.env.VITE_SOCIAL_DISCORD || "https://discord.gg/AnNCXCef",
+  groupme:
+    import.meta.env.VITE_SOCIAL_GROUPME ||
+    "https://groupme.com/join_group/110861155/abrXDGzA",
 };

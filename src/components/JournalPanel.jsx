@@ -1,248 +1,250 @@
 // src/components/JournalPanel.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api/axios";
+import { getBacktestTrades, saveTradeJournal } from "../api/journal";
 
 /**
- * JournalPanel — MVP Reflection + Photos
- * Works with or without a tradeId. Dark theme, no white hovers.
+ * Weighted Likert (1–5) journal + mistake tags, attached to a selected trade.
+ * Writes a structured JRNL_V2 block into trade.notes via a dedicated endpoint.
  */
-const STORAGE_KEY = "qe_journal_reflections_v1";
 
-const DEFAULT_PROMPTS = [
-  { id: "rule", label: "What rule did this trade express (or break)?" },
-  { id: "emotion", label: "Strongest emotion pre/post entry?" },
-  { id: "setup", label: "Setup grade (A/B/C) and why?" },
-  { id: "improve", label: "One improvement for next time?" },
-  { id: "ev", label: "If repeated 100 times, is this +EV? Why?" },
+const tokens = {
+  muted: "#9aa8bd",
+  grid: "#263245",
+  primary: "#4f46e5",
+};
+
+const DEFAULT_QUESTIONS = [
+  { key: "Focus",     label: "Focus on process (not P&L)",  weight: 1.0 },
+  { key: "Plan",      label: "Followed the plan/criteria",   weight: 1.2 },
+  { key: "Emotions",  label: "Emotional control",            weight: 1.1 },
+  { key: "Rules",     label: "Risk & rules adhered",         weight: 1.3 },
+  { key: "Patience",  label: "Patience / No forcing",        weight: 1.0 },
+  { key: "Setup",     label: "Took only A-setup quality",    weight: 1.1 },
+  { key: "Risk",      label: "Position sizing / R:R aligned",weight: 1.2 },
+  { key: "NewsDisc",  label: "Respected news/vol events",    weight: 0.8 },
 ];
 
-export default function JournalPanel({ tradeId = null, initialNotes = "", onSaved, compact = false }) {
-  const [mood, setMood] = useState(3); // 1..5
-  const [tags, setTags] = useState("");
-  const [answers, setAnswers] = useState(Object.fromEntries(DEFAULT_PROMPTS.map(p => [p.id, ""])));
-  const [notes, setNotes] = useState(initialNotes || "");
-  const [files, setFiles] = useState([]);
-  const [previews, setPreviews] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState("");
+const MISTAKE_TAGS = [
+  "fomo","revenge","overtrade","chase","hesitation",
+  "early_exit","late_exit","rule_break","move_stop",
+  "impulsive_entry","impulsive_exit"
+];
+
+export default function JournalPanel({ runId, compact }) {
+  const [trades, setTrades] = useState([]);
+  const [tradeId, setTradeId] = useState("");
+  const [answers, setAnswers] = useState(() =>
+    Object.fromEntries(DEFAULT_QUESTIONS.map(q => [q.key, 3]))
+  );
+  const [mistakes, setMistakes] = useState(new Set());
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const all = JSON.parse(raw) || {};
-      const key = tradeId ? String(tradeId) : "__standalone__";
-      const r = all[key];
-      if (!r) return;
-      if (typeof r.mood === "number") setMood(r.mood);
-      if (typeof r.tags === "string") setTags(r.tags);
-      if (r.answers) setAnswers(prev => ({ ...prev, ...r.answers }));
-      if (!initialNotes && typeof r.notes === "string") setNotes(r.notes);
-      if (Array.isArray(r.photos)) setPreviews(r.photos.map((url, i) => ({ name: `photo-${i+1}`, url })));
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradeId]);
-
-  function saveLocal(payload) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const all = raw ? JSON.parse(raw) : {};
-      const key = tradeId ? String(tradeId) : "__standalone__";
-      all[key] = payload;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-    } catch {}
-  }
-
-  function onPickFiles(e) {
-    const list = Array.from(e.target.files || []);
-    setFiles(list);
-    setPreviews(list.map((f) => ({ name: f.name, url: URL.createObjectURL(f) })));
-  }
-
-  async function uploadFile(file) {
-    const fd = new FormData();
-    fd.append("file", file);
-    try {
-      const r = await api.post("/api/journal/uploads/", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      return r?.data?.url || null;
-    } catch {
-      return URL.createObjectURL(file);
-    }
-  }
-
-  async function persistServer(payload) {
-    try {
-      await api.post("/api/journal/reflections/", payload);
-      return { ok: true, mode: "reflections" };
-    } catch (e1) {
-      if (tradeId) {
-        try {
-          const append = `\n\n---\n[Reflection]\n${payload.notes || ""}`;
-          await api.patch(`/api/journal/trades/${tradeId}/`, { notes: append }, { headers: { "Content-Type": "application/json" } });
-          return { ok: true, mode: "trade-notes" };
-        } catch (e2) {
-          return { ok: false, error: e2?.message || "save_failed" };
-        }
+    if (!runId) { setTrades([]); setTradeId(""); return; }
+    (async () => {
+      try {
+        const list = await getBacktestTrades(runId);
+        const sorted = (list || []).sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+        setTrades(sorted);
+        if (sorted[0]?.id) setTradeId(String(sorted[0].id));
+      } catch (e) {
+        console.error("load trades for journal", e);
+        setTrades([]);
       }
-      return { ok: false, error: e1?.message || "save_failed" };
-    }
+    })();
+  }, [runId]);
+
+  const scoreInfo = useMemo(() => {
+    const maxPerQ = 5;
+    const sumW = DEFAULT_QUESTIONS.reduce((a, q) => a + q.weight, 0);
+    const raw = DEFAULT_QUESTIONS.reduce((a, q) => {
+      const v = Number(answers[q.key] ?? 0);
+      return a + (v / maxPerQ) * q.weight;
+    }, 0);
+    const pct = Math.round((raw / sumW) * 100);
+
+    const flags = DEFAULT_QUESTIONS
+      .filter(q => Number(answers[q.key] ?? 0) <= 2)
+      .map(q => q.key.toLowerCase());
+
+    return { score: pct, flags };
+  }, [answers]);
+
+  function setLikert(key, val) {
+    setAnswers(prev => ({ ...prev, [key]: Number(val) }));
+  }
+  function toggleMistake(tag) {
+    setMistakes(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setStatus("Saving…");
-
-    let photoUrls = [];
-    if (files.length) {
-      const uploaded = await Promise.all(files.map(uploadFile));
-      photoUrls = uploaded.filter(Boolean);
-    } else if (previews.length) {
-      photoUrls = previews.map(p => p.url);
+  async function save() {
+    if (!runId || !tradeId) return;
+    setBusy(true);
+    try {
+      const payload = {
+        score: scoreInfo.score,
+        mistakes: [...mistakes],           // array or CSV is fine on the server
+        flags: scoreInfo.flags.length ? scoreInfo.flags : "none",
+        extra_notes: notes || "",
+      };
+      await saveTradeJournal(tradeId, payload);
+      setFlash({ type: "ok", text: "Journal saved to trade." });
+      // optional: refresh the single trade if you want to reflect notes immediately
+      setTimeout(() => setFlash(null), 1800);
+    } catch (e) {
+      console.error(e);
+      setFlash({ type: "err", text: "Save failed." });
+      setTimeout(() => setFlash(null), 2400);
+    } finally {
+      setBusy(false);
     }
-
-    const payload = {
-      trade: tradeId,
-      mood,
-      tags,
-      answers,
-      notes,
-      photos: photoUrls,
-      source: "journal_panel_v1",
-      timestamp: new Date().toISOString(),
-    };
-
-    saveLocal(payload);
-    const res = await persistServer(payload);
-
-    setSaving(false);
-    if (res.ok) {
-      setStatus(res.mode === "reflections" ? "Saved to server." : "Saved to trade notes.");
-    } else {
-      setStatus("Saved locally (server unavailable).");
-    }
-    if (onSaved) onSaved(payload);
   }
-
-  const inputCls =
-    "mt-1 w-full px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-0 focus:border-neutral-600";
-  const btnPrimary =
-    "px-4 py-2 rounded-xl border bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500";
-  const btnGhost =
-    "px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm text-neutral-200 border border-neutral-700";
 
   return (
-    <div className="rounded-2xl border border-neutral-800 p-4 bg-[color:var(--card,#0B0B10)]">
-      <div className={`flex items-center justify-between ${compact ? "mb-2" : "mb-3"}`}>
-        <div>
-          <h3 className="text-base font-semibold text-neutral-100">
-            {tradeId ? `Journal · Trade #${tradeId}` : "Journal"}
-          </h3>
-          {!compact && (
-            <p className="text-xs text-neutral-400">
-              Capture quick reflections. Photos are optional.
-            </p>
-          )}
-        </div>
-        <div className="text-[11px] text-neutral-500">{status}</div>
-      </div>
-
-      {/* Mood + Tags */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-neutral-300 w-16">Mood</label>
-          <input
-            type="range"
-            min="1"
-            max="5"
-            value={mood}
-            onChange={(e) => setMood(Number(e.target.value))}
-            className="w-full accent-indigo-500"
-          />
-          <span className="text-xs text-neutral-400 w-6 text-right">{mood}</span>
-        </div>
-
-        <div className="sm:col-span-2">
-          <label className="text-sm text-neutral-300">Tags (comma separated)</label>
-          <input
-            type="text"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            placeholder="e.g. trend, nfp, gold"
-            className={inputCls}
-          />
-        </div>
-      </div>
-
-      {/* Prompts */}
-      <div className="space-y-3">
-        {DEFAULT_PROMPTS.map((p) => (
-          <div key={p.id}>
-            <label className="text-sm text-neutral-300">{p.label}</label>
-            <textarea
-              rows={2}
-              value={answers[p.id] || ""}
-              onChange={(e) => setAnswers((prev) => ({ ...prev, [p.id]: e.target.value }))}
-              className={inputCls}
-            />
-          </div>
-        ))}
-      </div>
-
-      {/* Free notes */}
-      <div className="mt-3">
-        <label className="text-sm text-neutral-300">Notes</label>
-        <textarea
-          rows={4}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Anything else worth noting…"
-          className={inputCls}
-        />
-      </div>
-
-      {/* Photos */}
-      <div className="mt-3">
-        <label className="text-sm text-neutral-300">Add Photo(s)</label>
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={onPickFiles}
-          className="mt-1 block w-full text-sm text-neutral-300 file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border file:border-neutral-700 file:bg-neutral-800 file:text-neutral-200 hover:file:bg-neutral-700"
-        />
-        {!!previews.length && (
-          <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {previews.map((p, i) => (
-              <div key={i} className="relative border border-neutral-800 rounded-lg overflow-hidden">
-                <img src={p.url} alt={p.name} className="w-full h-24 object-cover" />
-              </div>
-            ))}
+    <div className={`rounded-xl border ${compact ? "p-3" : "p-4"}`} style={{ borderColor: tokens.grid }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-medium">Post-Trade Review (Weighted)</div>
+        {flash && (
+          <div
+            className="text-xs px-2 py-1 rounded-md"
+            style={flash.type === "ok"
+              ? { color: "#10b981", background: "rgba(16,185,129,.12)", border: "1px solid rgba(16,185,129,.3)" }
+              : { color: "#ef4444", background: "rgba(239,68,68,.12)", border: "1px solid rgba(239,68,68,.3)" }
+            }
+          >
+            {flash.text}
           </div>
         )}
       </div>
 
-      {/* Actions */}
-      <div className="mt-4 flex flex-col sm:flex-row gap-2">
-        <button onClick={handleSave} disabled={saving}
-          className={saving ? "px-4 py-2 rounded-xl bg-neutral-800 text-neutral-500 border border-neutral-800" : btnPrimary}>
-          {saving ? "Saving…" : "Save Journal"}
-        </button>
-        <button
-          onClick={() => {
-            setMood(3); setTags(""); setAnswers(Object.fromEntries(DEFAULT_PROMPTS.map(p => [p.id, ""])));
-            setNotes(""); setFiles([]); setPreviews([]); setStatus("");
-          }}
-          className={btnGhost}
-        >
-          Reset
-        </button>
-      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="md:col-span-2">
+          <div className="grid gap-3">
+            {DEFAULT_QUESTIONS.map(q => (
+              <LikertRow
+                key={q.key}
+                label={`${q.label} (w=${q.weight})`}
+                name={`q_${q.key}`}             // unique name to keep radios independent
+                value={answers[q.key]}
+                onChange={v => setLikert(q.key, v)}
+              />
+            ))}
 
-      <p className="mt-2 text-[11px] text-neutral-500">
-        Tip: If the server endpoints aren’t ready, entries are kept locally and sync later.
-      </p>
+            {/* Mistake tags */}
+            <div className="rounded-lg border p-3" style={{ borderColor: tokens.grid }}>
+              <div className="text-sm mb-2">Mistakes (tag what happened)</div>
+              <div className="flex flex-wrap gap-2">
+                {MISTAKE_TAGS.map(tag => {
+                  const active = mistakes.has(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleMistake(tag)}
+                      className="px-2 py-1 rounded-md text-xs border"
+                      style={{
+                        borderColor: active ? "#4f46e5" : tokens.grid,
+                        background: active ? "rgba(79,70,229,.14)" : "transparent"
+                      }}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs" style={{ color: tokens.muted }}>Notes (optional)</label>
+              <textarea
+                rows={2}
+                className="qe-field mt-1 w-full"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Context, mistake anatomy, corrective action…"
+              />
+            </div>
+          </div>
+        </div>
+
+        <aside className="md:col-span-1">
+          <div className="rounded-lg border p-3" style={{ borderColor: tokens.grid }}>
+            <div className="text-xs" style={{ color: tokens.muted }}>Attach to trade</div>
+            <select
+              className="qe-select mt-1 w-full"
+              value={tradeId}
+              onChange={(e) => setTradeId(e.target.value)}
+            >
+              {(trades || []).map(t => (
+                <option key={t.id} value={t.id}>
+                  #{t.id} • {t.symbol || "—"} • {t.date || "—"} {t.trade_time?.slice(0,5) || ""}
+                </option>
+              ))}
+              {(!trades || trades.length === 0) && <option value="">No trades yet</option>}
+            </select>
+
+            <div className="mt-3">
+              <div className="text-xs" style={{ color: tokens.muted }}>Discipline Score</div>
+              <div className="text-2xl font-semibold mt-1">{scoreInfo.score}</div>
+              {scoreInfo.flags.length > 0 && (
+                <div className="mt-2 text-xs" style={{ color: tokens.muted }}>
+                  Flags: {scoreInfo.flags.join(", ")}
+                </div>
+              )}
+            </div>
+
+            <button
+              className="mt-3 px-3 py-2 rounded-lg text-white w-full text-sm disabled:opacity-60"
+              style={{ background: tokens.primary }}
+              onClick={save}
+              disabled={busy || !tradeId}
+            >
+              {busy ? "Saving…" : "Save to Trade"}
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function LikertRow({ label, name, value = 3, onChange }) {
+  const opts = [1, 2, 3, 4, 5];
+  return (
+    <div className="rounded-lg border p-3" style={{ borderColor: "#263245" }}>
+      <div className="text-sm mb-2">{label}</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {opts.map(v => (
+          <label
+            key={v}
+            className="inline-flex items-center gap-2 px-2 py-1 rounded-md border cursor-pointer"
+            style={{
+              borderColor: value === v ? "#4f46e5" : "#263245",
+              background: value === v ? "rgba(79,70,229,.12)" : "transparent"
+            }}
+          >
+            <input
+              type="radio"
+              name={name}
+              className="accent-indigo-600"
+              checked={value === v}
+              onChange={() => onChange(v)}
+            />
+            <span className="text-xs" style={{ color: "#9aa8bd" }}>{v}</span>
+          </label>
+        ))}
+        <span className="ml-2 text-xs" style={{ color: "#9aa8bd" }}>
+          1 = poor, 5 = excellent
+        </span>
+      </div>
     </div>
   );
 }
