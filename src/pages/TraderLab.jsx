@@ -60,7 +60,6 @@ function toNumberLoose(x) {
 function pickFromNotes(notes, labels) {
   const txt = String(notes || "");
   for (const lab of labels) {
-    // Accept "LABEL = 123", "LABEL: 123", "label 123"
     const re = new RegExp(`${lab}\\s*[:=]?\\s*([\\$\\(\\)\\-0-9.,]+)`, "i");
     const m = txt.match(re);
     if (m && m[1] != null) {
@@ -75,6 +74,26 @@ function pickFromNotes(notes, labels) {
 function jsDowIndex(isoDate) {
   const dt = new Date(isoDate+"T00:00:00");
   return (dt.getDay()+6)%7;
+}
+
+/** small wait */
+const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+
+/** after import, poll until trades are visible (handles eventual consistency) */
+async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
+  setLoading(true);
+  for (let i = 0; i < tries; i++) {
+    const rows = await fetchFn(runId);
+    if (Array.isArray(rows) && rows.length > 0) {
+      setLoading(false);
+      return rows;
+    }
+    await sleep(400 + i * 150);
+  }
+  // last try result
+  const rows = await fetchFn(runId);
+  setLoading(false);
+  return rows;
 }
 
 const TZ_CHOICES = [
@@ -170,13 +189,25 @@ export default function TraderLab() {
       }
     }catch(e){ console.error("loadAccounts",e); }
   }
+
+  const fetchTrades = async (id) => {
+    try{
+      const {data} = await api.get("/api/journal/backtests/trades/", { params: { run: id } });
+      return Array.isArray(data) ? data : [];
+    }catch(e){
+      console.error("fetchTrades", e);
+      return [];
+    }
+  };
+
   async function loadTrades(id){
     setLoading(true);
     try{
-      const {data} = await api.get("/api/journal/backtests/trades/?run="+encodeURIComponent(id));
-      setTrades(data||[]);
-    }catch(e){ console.error(e); setTrades([]); }
-    finally{ setLoading(false); }
+      const rows = await fetchTrades(id);
+      setTrades(rows);
+    }finally{
+      setLoading(false);
+    }
   }
 
   async function createAccount(){
@@ -225,9 +256,11 @@ export default function TraderLab() {
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      await loadTrades(accountId);
+      // Retry-poll until trades show up
+      const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
+      setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
-      flash("ok", `CSV imported (${data?.imported ?? 0}/${data?.rows_parsed ?? 0})`);
+      flash("ok", `CSV imported (${data?.imported ?? rows.length}/${data?.rows_parsed ?? "?"})`);
     }catch(e){
       const msg = (e?.response?.data?.detail) ||
                   (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
@@ -238,8 +271,7 @@ export default function TraderLab() {
 
   async function createAccountAndImport(){
     if(!csvFile) return;
-    const name = window.prompt("New account name (from CSV):", csvFile.name.replace(/\.[^/.]+$/, ""));
-    if(!name) return;
+    const name = window.prompt("New account name (from CSV):", csvFile.name.replace(/\.[^/.]+$/, "")); if(!name) return;
     try{
       const {data} = await api.post("/api/journal/backtests/runs/", { name });
       const newId = String(data.id);
@@ -250,9 +282,13 @@ export default function TraderLab() {
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      // Retry-poll after creating new account
+      const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
+      setTrades(rows);
       await loadAccounts(newId);
       const d = resp?.data||{};
-      flash("ok", `Account created & CSV imported (${d.imported||"?"}/${d.rows_parsed||"?"})`);
+      flash("ok", `Account created & CSV imported (${d.imported ?? rows.length}/${d.rows_parsed ?? "?"})`);
+      setCsvFile(null); setCsvPreviewRows(null);
     }catch(e){
       const msg = (e?.response?.data?.detail) ||
                   (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
@@ -344,9 +380,8 @@ export default function TraderLab() {
   useEffect(()=>{ if(accountId){ try { localStorage.setItem(pnlMultKey(accountId), String(pnlMult)); } catch {} } }, [pnlMult, accountId]);
   useEffect(()=>{ if(accountId){ try { localStorage.setItem(acctSizeKey(accountId), String(acctSize)); } catch {} } }, [acctSize, accountId]);
 
-  /** ---------- Robust P&L extraction from a trade row ---------- */
+  /** ---------- Robust P&L extraction ---------- */
   function pnlOfRaw(t) {
-    // 1) Trusted numeric fields if backend set any of them
     const fieldCandidates = [
       "net_pnl","pnl","profit","realized_pnl","realized","gain","p_l","net_pl","netProfit","NetPL","PL"
     ];
@@ -356,14 +391,11 @@ export default function TraderLab() {
         if (v !== null) return v;
       }
     }
-
-    // 2) Parse from notes with many label variants
     const fromNotes = pickFromNotes(t?.notes, [
       "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS"
     ]);
     if (fromNotes !== null) return fromNotes;
 
-    // 3) Compute from prices & size if available
     const entry = toNumberLoose(t?.entry_price);
     const exit  = toNumberLoose(t?.exit_price);
     const size  = toNumberLoose(t?.size);
@@ -373,8 +405,6 @@ export default function TraderLab() {
       const delta = dir === "short" ? (entry - exit) : (exit - entry);
       return delta * size - fee;
     }
-
-    // 4) Nothing we can use
     return 0;
   }
   const pnlOf = (t)=> pnlOfRaw(t) * (Number.isFinite(pnlMult)?pnlMult:1);
@@ -383,11 +413,9 @@ export default function TraderLab() {
     const allRows = trades||[];
     const filtered = monthFilter==="all" ? allRows : allRows.filter(t=> String(t.date||"").startsWith(monthFilter));
 
-    // ---- infer win/loss robustly
     const withOutcome = filtered.map(t=>{
       let isWin = t.is_win;
       if (typeof isWin !== "boolean") {
-        // allow RESULT=WIN/LOSS in notes
         const res = String(t?.notes || "").match(/RESULT\s*[:=]\s*(WIN|LOSS)/i);
         if (res) isWin = res[1].toUpperCase() === "WIN";
       }
@@ -409,7 +437,6 @@ export default function TraderLab() {
     },{net:0,wins:0,losses:0});
     const winRate = withOutcome.length ? (totals.wins/withOutcome.length*100) : 0;
 
-    // ---- hour buckets
     const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0}));
     withOutcome.forEach(t=>{
       if(!t.trade_time) return;
@@ -427,12 +454,10 @@ export default function TraderLab() {
       pmTrades: b.pm,
     }));
 
-    // ---- top symbols
     const counts = {};
     withOutcome.forEach(t=>{ const s=(t.symbol||"—").toUpperCase(); counts[s]=(counts[s]||0)+1; });
     const pie = Object.keys(counts).map(k=> ({name:k, value:counts[k]})).sort((a,b)=>b.value-a.value).slice(0,12);
 
-    // ---- DOW chart + best day/win%
     const dow = Array.from({length:7},()=>({trades:0,wins:0,pnl:0}));
     const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     withOutcome.forEach(t=>{
@@ -452,7 +477,6 @@ export default function TraderLab() {
     const uniqueDays = new Set(withOutcome.map(t=>t.date).filter(Boolean));
     const avgPerDay = uniqueDays.size ? (totals.net / uniqueDays.size) : 0;
 
-    // ---- journal & flags/mistakes
     let sumScore = 0, countScore = 0;
     const flagCounts = {}, mistakeCounts = {};
     withOutcome.forEach(t=>{
@@ -491,7 +515,6 @@ export default function TraderLab() {
         <div className="flex flex-wrap gap-2 items-center">
           <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} onClick={createAccount}>New Account</button>
 
-          {/* slimmer account selects */}
           <select
             className="qe-select text-sm"
             value={accountId}
@@ -557,7 +580,6 @@ export default function TraderLab() {
         </div>
       )}
 
-      {/* CSV preview actions */}
       {csvPreviewRows && (
         <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
@@ -705,10 +727,8 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Lot size panel (same trades for consistency) */}
       <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
 
-      {/* Journal + Add trade */}
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <JournalPanel compact runId={accountId} />
@@ -755,7 +775,6 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* trades table — compact & professional */}
       <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
         <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
         <div className="overflow-auto">
@@ -827,7 +846,6 @@ export default function TraderLab() {
 
                     <Td className="truncate" title={stratTxt}>{stratTxt || "—"}</Td>
 
-                    {/* Compact Notes: button opens modal */}
                     <Td>
                       {(t.notes && t.notes.trim())
                         ? <button
@@ -868,7 +886,6 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Account Manager (slimmer) */}
       {showMgr && (
         <AccountManager
           accounts={accounts}
@@ -888,7 +905,6 @@ export default function TraderLab() {
         />
       )}
 
-      {/* Notes Modal */}
       {notesOpen && (
         <NotesModal
           title={notesTitle}
@@ -900,7 +916,7 @@ export default function TraderLab() {
   );
 }
 
-/* ------------ UI atoms (safe/simple) ------------ */
+/* ------------ UI atoms ------------ */
 function KPI(props){
   return (
     <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
@@ -1010,9 +1026,7 @@ function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}
 
 /* ---- Notes Modal ---- */
 function NotesModal({ title, content, onClose }){
-  const copy = () => {
-    try { navigator.clipboard.writeText(content || ""); } catch {}
-  };
+  const copy = () => { try { navigator.clipboard.writeText(content || ""); } catch {} };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-2xl bg-[#0b1220] rounded-xl border" style={{borderColor:tokens.grid}}>

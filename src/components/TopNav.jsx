@@ -64,6 +64,26 @@ export default function TopNav() {
       </span>
     ) : null;
 
+  // mailto
+  const mailtoHref = (() => {
+    const to = "quantum.edge.fx@gmail.com";
+    const subject = encodeURIComponent("QEFX - Issue:");
+    const body = encodeURIComponent(
+      [
+        "Describe the issue here (what happened, what you expected):",
+        "",
+        "Steps to reproduce:",
+        "1.",
+        "2.",
+        "",
+        "Your account email (if different):",
+        "",
+        "Screenshot / link (optional):",
+      ].join("\n")
+    );
+    return `mailto:${to}?subject=${subject}&body=${body}`;
+  })();
+
   return (
     <div className="sticky top-0 z-40 backdrop-blur bg-black/50 border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 h-14 flex items-center gap-3">
@@ -113,7 +133,7 @@ export default function TopNav() {
                 App + Add-ons (All-in-One)
               </a>
               <div className="h-px my-1 bg-white/10" />
-              <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.webinars} target="_blank" rel="noreferrer">
+              <a className="block px-3 py-2 rounded hover:bg:white/5" href={PAYLINKS.webinars} target="_blank" rel="noreferrer">
                 Live Webinars
               </a>
               <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.courses} target="_blank" rel="noreferrer">
@@ -141,6 +161,15 @@ export default function TopNav() {
           <a href={SOCIAL.instagram} target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Instagram"><Icon d={icons.ig} label="Instagram" /></a>
           <a href={SOCIAL.facebook}  target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Facebook"><Icon d={icons.fb} label="Facebook" /></a>
           <a href={SOCIAL.tiktok}    target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="TikTok"><Icon d={icons.tt} label="TikTok" /></a>
+
+          {/* NEW: Support */}
+          <a
+            href={mailtoHref}
+            className="px-3 py-2 rounded-xl text-sm text-neutral-300 hover:text-white border border-transparent hover:border-white/10"
+            title="Contact support"
+          >
+            Support
+          </a>
 
           {/* Auth */}
           {isAuthed ? (
