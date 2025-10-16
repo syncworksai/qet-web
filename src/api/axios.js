@@ -7,11 +7,11 @@ const isLocal =
   (window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1");
 
-/** Env base from Vite (may be empty) */
+/** Env base from Vite (support either name) */
 const ENV_BASE =
   (typeof import.meta !== "undefined" &&
     import.meta.env &&
-    import.meta.env.VITE_API_BASE_URL) ||
+    (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL)) ||
   "";
 
 /** Final API base (no trailing slash) */
@@ -25,7 +25,7 @@ export const API_BASE =
  * Normalize a URL so that:
  *  - relative & same-host absolute URLs are forced under /api/
  *  - the PATH has a trailing slash
- *  - any route-template leftovers like `/:id` are sanitized to `/id`
+ *  - leftover route templates like `/:id` become `/id`
  *  - query/hash are preserved
  *  - third-party absolute URLs are untouched
  */
@@ -34,15 +34,13 @@ function normalizeUrl(url) {
 
   const u = String(url);
 
-  // helper to clean route-template colons and add trailing slash to PATH only
   const cleanAndSlash = (path = "", query = "", hash = "") => {
-    let p = path;
-    p = p.replace(/\/:([^/?#]+)/g, "/$1"); // "/:id" -> "/id"
+    let p = path.replace(/\/:([^/?#]+)/g, "/$1");
     if (!p.endsWith("/")) p += "/";
     return p + (query || "") + (hash || "");
   };
 
-  // ABSOLUTE?
+  // Absolute URL?
   if (/^https?:\/\//i.test(u)) {
     try {
       const abs = new URL(u);
@@ -52,7 +50,7 @@ function normalizeUrl(url) {
         abs.hostname === base.hostname &&
         abs.port === base.port;
 
-      if (!sameHost) return u; // third-party host → leave as-is
+      if (!sameHost) return u; // third-party host
 
       const match = abs.pathname.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/);
       let path = match?.[1] ?? "";
@@ -69,7 +67,7 @@ function normalizeUrl(url) {
     }
   }
 
-  // RELATIVE
+  // Relative
   const match = u.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/);
   let path = match?.[1] ?? "";
   const query = match?.[2] ?? "";
@@ -193,7 +191,7 @@ if (typeof window !== "undefined" && import.meta?.env?.DEV) {
   console.log("[QE] API_BASE =", API_BASE);
 }
 
-/** Helper to build /api/.../ paths consistently */
+/** Helper to build /api/... paths consistently */
 export const apiPath = (p) => {
   let s = typeof p === "string" ? p : "";
   const match = s.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/);

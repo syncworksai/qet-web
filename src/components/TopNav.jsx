@@ -113,7 +113,7 @@ export default function TopNav() {
                 App + Add-ons (All-in-One)
               </a>
               <div className="h-px my-1 bg-white/10" />
-              <a className="block px-3 py-2 rounded hover:bg:white/5" href={PAYLINKS.webinars} target="_blank" rel="noreferrer">
+              <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.webinars} target="_blank" rel="noreferrer">
                 Live Webinars
               </a>
               <a className="block px-3 py-2 rounded hover:bg-white/5" href={PAYLINKS.courses} target="_blank" rel="noreferrer">
@@ -140,7 +140,7 @@ export default function TopNav() {
           <a href={SOCIAL.youtube}   target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="YouTube"><Icon d={icons.yt} label="YouTube" /></a>
           <a href={SOCIAL.instagram} target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Instagram"><Icon d={icons.ig} label="Instagram" /></a>
           <a href={SOCIAL.facebook}  target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="Facebook"><Icon d={icons.fb} label="Facebook" /></a>
-          <a href={SOCIAL.tiktok}    target="_blank" rel="noreferrer" className="text-neutral-300 hover:text:white" title="TikTok"><Icon d={icons.tt} label="TikTok" /></a>
+          <a href={SOCIAL.tiktok}    target="_blank" rel="noreferrer" className="text-neutral-300 hover:text-white" title="TikTok"><Icon d={icons.tt} label="TikTok" /></a>
 
           {/* Auth */}
           {isAuthed ? (
