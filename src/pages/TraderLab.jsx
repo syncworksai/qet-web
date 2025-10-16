@@ -90,10 +90,90 @@ async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
     }
     await sleep(400 + i * 150);
   }
-  // last try result
   const rows = await fetchFn(runId);
   setLoading(false);
   return rows;
+}
+
+/* ---------------- CSV → app field normalizer ---------------- */
+/**
+ * MT4/5 & similar exports:
+ * SYM, OPEN DATE, OPEN PRICE, CLOSE DATE, CLOSE PRICE, TYPE, STOP LOSS, TAKE PROFIT, LOTS, PROFIT, ...
+ * Dates can be like 2025-10-0314:14:25 (no space/T). This maps to app fields.
+ */
+function normalizeImportedRow(tRaw) {
+  const t = { ...(tRaw || {}) };
+
+  // helper: get first non-null from aliases (case insensitive)
+  const get = (...aliases) => {
+    for (const a of aliases) {
+      if (t[a] != null) return t[a];
+      const lower = a.toLowerCase();
+      const keys = Object.keys(t);
+      const hit = keys.find(k => k.toLowerCase() === lower);
+      if (hit) return t[hit];
+    }
+    return null;
+  };
+
+  // symbol
+  let symbol = get("symbol", "sym", "ticker");
+  if (symbol) t.symbol = String(symbol).toUpperCase();
+
+  // direction (BUY/SELL → long/short)
+  const type = String(get("direction", "type", "side") || "").toLowerCase();
+  if (type) t.direction = /sell/.test(type) ? "short" : "long";
+
+  // sizes & prices
+  const lots = get("size", "qty", "quantity", "lots", "contracts", "shares");
+  if (lots != null && t.size == null) t.size = toNumberLoose(lots);
+
+  const openP = get("entry_price", "open price", "open_price", "price_open");
+  if (openP != null && t.entry_price == null) t.entry_price = toNumberLoose(openP);
+
+  const closeP = get("exit_price", "close price", "close_price", "price_close");
+  if (closeP != null && t.exit_price == null) t.exit_price = toNumberLoose(closeP);
+
+  const fee = get("fee", "commission", "fees");
+  if (fee != null && t.fee == null) t.fee = toNumberLoose(fee) || 0;
+
+  // PROFIT → net_pnl so pnlOf() finds it
+  const profit = get("net_pnl", "pnl", "profit", "net pl", "pl", "realized_pnl");
+  if (profit != null && t.net_pnl == null) t.net_pnl = toNumberLoose(profit);
+
+  // SL/TP → append to notes
+  const sl = get("stop_loss", "stop loss", "sl");
+  const tp = get("take_profit", "take profit", "tp");
+  const parts = [];
+  if (sl != null) parts.push(`SL: ${sl}`);
+  if (tp != null) parts.push(`TP: ${tp}`);
+  if (parts.length) {
+    const pre = t.notes ? String(t.notes).trim() + " | " : "";
+    t.notes = pre + parts.join(" | ");
+  }
+
+  // date + time from OPEN DATE
+  const od = String(get("open date", "open_date", "date", "timestamp") || "");
+  if (od) {
+    let ymd = "", hms = "00:00:00";
+    const compact = od.replace(/\s+/g, "");
+    let m = compact.match(/^(\d{4}-\d{2}-\d{2})(\d{2}:\d{2}:\d{2})$/);
+    if (m) {
+      ymd = m[1]; hms = m[2];
+    } else {
+      m = od.match(/^(\d{4}-\d{2}-\d{2})[ T]?(\d{2}:\d{2}:\d{2})?$/);
+      if (m) { ymd = m[1]; if (m[2]) hms = m[2]; }
+    }
+    if (ymd) { t.date = ymd; t.trade_time = hms; }
+  }
+
+  // fallback symbol from SYM
+  if (!t.symbol) {
+    const s2 = get("sym");
+    if (s2) t.symbol = String(s2).toUpperCase();
+  }
+
+  return t;
 }
 
 const TZ_CHOICES = [
@@ -156,6 +236,7 @@ export default function TraderLab() {
   const [notice, setNotice] = useState(null);
 
   // NOTES MODAL
+  theadOpen
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesContent, setNotesContent] = useState("");
   const [notesTitle, setNotesTitle] = useState("");
@@ -190,10 +271,12 @@ export default function TraderLab() {
     }catch(e){ console.error("loadAccounts",e); }
   }
 
+  // ✅ fetch & normalize trades so charts/KPIs work after CSV import
   const fetchTrades = async (id) => {
     try{
       const {data} = await api.get("/api/journal/backtests/trades/", { params: { run: id } });
-      return Array.isArray(data) ? data : [];
+      const rows = Array.isArray(data) ? data : [];
+      return rows.map(normalizeImportedRow);
     }catch(e){
       console.error("fetchTrades", e);
       return [];
@@ -256,7 +339,7 @@ export default function TraderLab() {
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      // Retry-poll until trades show up
+      // Retry/poll until backend has finished ingesting
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
@@ -282,7 +365,6 @@ export default function TraderLab() {
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      // Retry-poll after creating new account
       const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
       setTrades(rows);
       await loadAccounts(newId);
@@ -470,7 +552,7 @@ export default function TraderLab() {
     const dowChart = dow.map((d,i)=> ({ name:names[i], trades:d.trades, winRate: d.trades ? (d.wins/d.trades*100) : 0, pnl:d.pnl }));
     let bestDay = null;
     for (let i=0;i<dow.length;i++){
-      const wr = dow[i].trades ? (dow[i].wins/dow[i].trades) : 0;
+      const wr = dow[i].trades ? (d.wins/d.trades) : 0;
       if (!bestDay || wr > bestDay.wr) bestDay = { label:names[i], wr: Math.round(wr*100) };
     }
 
@@ -727,8 +809,10 @@ export default function TraderLab() {
         </div>
       </div>
 
+      {/* Lot size panel (same trades for consistency) */}
       <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
 
+      {/* Journal + Add trade */}
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <JournalPanel compact runId={accountId} />
@@ -775,6 +859,7 @@ export default function TraderLab() {
         </div>
       </div>
 
+      {/* trades table — compact & professional */}
       <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
         <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
         <div className="overflow-auto">
@@ -846,6 +931,7 @@ export default function TraderLab() {
 
                     <Td className="truncate" title={stratTxt}>{stratTxt || "—"}</Td>
 
+                    {/* Compact Notes: button opens modal */}
                     <Td>
                       {(t.notes && t.notes.trim())
                         ? <button
@@ -886,6 +972,7 @@ export default function TraderLab() {
         </div>
       </div>
 
+      {/* Account Manager (slimmer) */}
       {showMgr && (
         <AccountManager
           accounts={accounts}
@@ -905,6 +992,7 @@ export default function TraderLab() {
         />
       )}
 
+      {/* Notes Modal */}
       {notesOpen && (
         <NotesModal
           title={notesTitle}
