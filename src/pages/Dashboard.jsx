@@ -3,8 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { api } from "../api/axios";
 
 import MarketClocks from "../components/MarketClocks";
-import Watchlist from "../components/Watchlist";
-import LiteChart from "../components/LiteChart";
+// removed: Watchlist
+// removed: LiteChart
 import NewsFeed from "../components/NewsFeed";
 import ForexCalendar from "../components/ForexCalendar";
 import AlertCenter from "../components/AlertCenter";
@@ -212,7 +212,7 @@ const DEFAULT_ACTIVE = { symbol: "XAUUSD", asset_type: "forex" };
 
 export default function Dashboard() {
   const t = useTokens();
-  const [active, setActive] = useState(DEFAULT_ACTIVE);
+  const [active] = useState(DEFAULT_ACTIVE); // still used for Market News subtitle
   const [alertOpen, setAlertOpen] = useState(false);
 
   const headerTitle = useMemo(() => {
@@ -242,12 +242,11 @@ export default function Dashboard() {
       {/* Market clocks */}
       <MarketClocks />
 
-      {/* 1) QE NEWS — top & prominent */}
+      {/* 1) QE NEWS */}
       <QuantumEdgeNewsPanel />
 
-      {/* 2) **SWAPPED** FOREX CALENDAR (LEFT, WIDE) + MARKET NEWS (RIGHT, NARROW) */}
+      {/* 2) Forex Calendar (Left, wide) + Market News (Right, narrow) */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* LEFT: Calendar (2/3) */}
         <div className="xl:col-span-2">
           <Section
             title="Forex Calendar"
@@ -258,7 +257,6 @@ export default function Dashboard() {
           </Section>
         </div>
 
-        {/* RIGHT: Market News (1/3) */}
         <div className="xl:col-span-1">
           <Section
             title="Market News"
@@ -273,38 +271,6 @@ export default function Dashboard() {
           >
             <div className="max-h-[62vh] overflow-auto p-4 md:p-5">
               <NewsFeed symbol={active?.symbol} assetType={active?.asset_type} />
-            </div>
-          </Section>
-        </div>
-      </div>
-
-      {/* 3) CHART (LARGE) + WATCHLIST (SMALLER) */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Chart: 2/3 width on xl */}
-        <div className="xl:col-span-2">
-          <Section
-            title="Chart"
-            subtitle="Lightweight chart for quick analysis"
-            icon={<span className="text-xs">📊</span>}
-            bodyClass="p-0"
-          >
-            <div className="p-4 md:p-5">
-              <div className="rounded-xl overflow-hidden ring-1 ring-white/10">
-                <LiteChart active={active} />
-              </div>
-            </div>
-          </Section>
-        </div>
-
-        {/* Watchlist: 1/3 width on xl */}
-        <div className="xl:col-span-1">
-          <Section
-            title="Watchlist"
-            subtitle="Click any symbol to load the chart"
-            icon={<span className="text-xs">📈</span>}
-          >
-            <div className="rounded-xl border" style={{ borderColor: t.grid, background: t.cardSoft }}>
-              <Watchlist onSelectSymbol={(s) => s && setActive(s)} />
             </div>
           </Section>
         </div>
