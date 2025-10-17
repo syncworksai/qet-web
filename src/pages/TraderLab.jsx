@@ -95,50 +95,53 @@ async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
   return rows;
 }
 
-/* ---------------- CSV → app field normalizer ---------------- */
+/* -------- CSV header flexibility (DEAL is optional/ignored) -------- */
 /**
- * Typical MT4/5 / cTrader export:
+ * Many MT4/5 and cTrader exports look like:
  * SYM, OPEN DATE, OPEN PRICE, CLOSE DATE, CLOSE PRICE, TYPE, STOP LOSS, TAKE PROFIT, LOTS, PROFIT, ...
  * Dates can be like 2025-10-0314:14:25 (no space/T).
- * Map them to: symbol, direction, size, entry_price, exit_price, fee, net_pnl, date, trade_time, notes+SL/TP
+ * We only use this for local preview and to show users the mapping works; the server import does its own parse.
  */
 function normalizeImportedRow(tRaw) {
   const t = { ...(tRaw || {}) };
-
   const get = (...aliases) => {
     for (const a of aliases) {
       if (t[a] != null) return t[a];
       const lower = a.toLowerCase();
-      const keys = Object.keys(t);
-      const hit = keys.find(k => k.toLowerCase() === lower);
+      const hit = Object.keys(t).find(k => k.toLowerCase() === lower);
       if (hit) return t[hit];
     }
     return null;
   };
 
+  // symbol
   let symbol = get("symbol", "sym", "ticker");
   if (symbol) t.symbol = String(symbol).toUpperCase();
 
-  const type = String(get("direction", "type", "side") || "").toLowerCase();
+  // direction (BUY/SELL → long/short)
+  const type = String(get("direction","type","side") || "").toLowerCase();
   if (type) t.direction = /sell/.test(type) ? "short" : "long";
 
-  const lots = get("size", "qty", "quantity", "lots", "contracts", "shares");
+  // size / prices
+  const lots = get("size","qty","quantity","lots","contracts","shares");
   if (lots != null && t.size == null) t.size = toNumberLoose(lots);
 
-  const openP = get("entry_price", "open price", "open_price", "price_open");
+  const openP = get("entry_price","open price","open_price","price_open");
   if (openP != null && t.entry_price == null) t.entry_price = toNumberLoose(openP);
 
-  const closeP = get("exit_price", "close price", "close_price", "price_close");
+  const closeP = get("exit_price","close price","close_price","price_close");
   if (closeP != null && t.exit_price == null) t.exit_price = toNumberLoose(closeP);
 
-  const fee = get("fee", "commission", "fees");
+  const fee = get("fee","commission","fees");
   if (fee != null && t.fee == null) t.fee = toNumberLoose(fee) || 0;
 
-  const profit = get("net_pnl", "pnl", "profit", "net pl", "pl", "realized_pnl");
+  // PROFIT → net_pnl
+  const profit = get("net_pnl","pnl","profit","net pl","pl","realized_pnl");
   if (profit != null && t.net_pnl == null) t.net_pnl = toNumberLoose(profit);
 
-  const sl = get("stop_loss", "stop loss", "sl");
-  const tp = get("take_profit", "take profit", "tp");
+  // SL/TP → append to notes (if present). DEAL is explicitly ignored.
+  const sl = get("stop_loss","stop loss","sl");
+  const tp = get("take_profit","take profit","tp");
   const parts = [];
   if (sl != null) parts.push(`SL: ${sl}`);
   if (tp != null) parts.push(`TP: ${tp}`);
@@ -147,26 +150,19 @@ function normalizeImportedRow(tRaw) {
     t.notes = pre + parts.join(" | ");
   }
 
-  // OPEN DATE → date + time (accepts “YYYY-MM-DDhh:mm:ss”, “YYYY-MM-DD hh:mm:ss”, “YYYY-MM-DDThh:mm:ss”)
-  const od = String(get("open date", "open_date", "date", "timestamp") || "");
+  // date + time from OPEN DATE
+  const od = String(get("open date","open_date","date","timestamp") || "");
   if (od) {
     let ymd = "", hms = "00:00:00";
     const compact = od.replace(/\s+/g, "");
     let m = compact.match(/^(\d{4}-\d{2}-\d{2})(\d{2}:\d{2}:\d{2})$/);
-    if (m) {
-      ymd = m[1]; hms = m[2];
-    } else {
+    if (m) { ymd=m[1]; hms=m[2]; }
+    else {
       m = od.match(/^(\d{4}-\d{2}-\d{2})[ T]?(\d{2}:\d{2}:\d{2})?$/);
-      if (m) { ymd = m[1]; if (m[2]) hms = m[2]; }
+      if (m) { ymd=m[1]; if (m[2]) hms=m[2]; }
     }
     if (ymd) { t.date = ymd; t.trade_time = hms; }
   }
-
-  if (!t.symbol) {
-    const s2 = get("sym");
-    if (s2) t.symbol = String(s2).toUpperCase();
-  }
-
   return t;
 }
 
@@ -229,10 +225,12 @@ export default function TraderLab() {
   const [showMgr, setShowMgr] = useState(false);
   const [notice, setNotice] = useState(null);
 
-  // NOTES MODAL
+  // NOTES MODAL (now editable)
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesContent, setNotesContent] = useState("");
   const [notesTitle, setNotesTitle] = useState("");
+  const [notesTradeId, setNotesTradeId] = useState(null);
+  const [savingNotes, setSavingNotes] = useState(false);
 
   const flash = (type, text)=>{ setNotice({type, text}); setTimeout(()=>setNotice(null), 2400); };
 
@@ -316,7 +314,12 @@ export default function TraderLab() {
     setCsvFile(file);
     Papa.parse(file, {
       header: true, skipEmptyLines: true,
-      complete: res=>setCsvPreviewRows(res.data||[]),
+      complete: res=>{
+        const raw = res.data || [];
+        // show a normalized preview so users see what will be used
+        const normalized = raw.map(normalizeImportedRow);
+        setCsvPreviewRows(normalized);
+      },
       error: ()=>setCsvPreviewRows(null)
     });
   }
@@ -330,6 +333,7 @@ export default function TraderLab() {
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      // Retry-poll until trades show up
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
@@ -355,6 +359,7 @@ export default function TraderLab() {
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      // Retry-poll after creating new account
       const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
       setTrades(rows);
       await loadAccounts(newId);
@@ -437,6 +442,29 @@ export default function TraderLab() {
     catch{ window.alert("Remove failed"); }
   }
 
+  // open editable notes modal for a trade
+  function openNotesEditor(t){
+    setNotesTradeId(t.id);
+    setNotesTitle(`#${t.id} • ${t.symbol || "—"} • ${t.date || "—"} ${t.trade_time?.slice(0,5)||""}`);
+    setNotesContent(t.notes || "");
+    setNotesOpen(true);
+  }
+  async function saveNotes(){
+    if (!notesTradeId) return;
+    setSavingNotes(true);
+    try{
+      await api.patch(`/api/journal/backtests/trades/${notesTradeId}/`, { notes: notesContent || "" });
+      setNotesOpen(false);
+      await loadTrades(accountId);
+      flash("ok","Notes updated");
+    }catch(e){
+      console.error(e);
+      window.alert("Failed to save notes.");
+    }finally{
+      setSavingNotes(false);
+    }
+  }
+
   const monthOptions = useMemo(()=>{
     const set = new Set();
     (trades||[]).forEach(t=>{
@@ -482,10 +510,7 @@ export default function TraderLab() {
   const pnlOf = (t)=> pnlOfRaw(t) * (Number.isFinite(pnlMult)?pnlMult:1);
 
   const stats = useMemo(()=>{
-    // ✅ Normalize all rows first so CSVs with odd headers compute correctly
-    const normalizedAll = (trades || []).map(normalizeImportedRow);
-    const allRows = normalizedAll;
-
+    const allRows = trades||[];
     const filtered = monthFilter==="all" ? allRows : allRows.filter(t=> String(t.date||"").startsWith(monthFilter));
 
     const withOutcome = filtered.map(t=>{
@@ -590,7 +615,6 @@ export default function TraderLab() {
         <div className="flex flex-wrap gap-2 items-center">
           <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} onClick={createAccount}>New Account</button>
 
-          {/* slimmer account selects */}
           <select
             className="qe-select text-sm"
             value={accountId}
@@ -656,7 +680,6 @@ export default function TraderLab() {
         </div>
       )}
 
-      {/* CSV preview actions */}
       {csvPreviewRows && (
         <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
@@ -672,11 +695,13 @@ export default function TraderLab() {
               </select>
               <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} disabled={importing} onClick={importCsvIntoCurrent}>{importing?"Importing…":"Import to Account"}</button>
               <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={createAccountAndImport}>Create Account & Import</button>
-              <button className="px-3 py-2 rounded/lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>Discard</button>
+              <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>Discard</button>
             </div>
           </div>
           <CsvPreview rows={csvPreviewRows}/>
-          <div className="text-xs mt-2" style={{color:tokens.muted}}>Uses the same flexible headers as Backtesting.</div>
+          <div className="text-xs mt-2" style={{color:tokens.muted}}>
+            Expected columns are flexible. <strong>DEAL is optional and ignored.</strong> SL/TP are appended to notes automatically.
+          </div>
         </div>
       )}
 
@@ -804,10 +829,8 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Lot size panel */}
       <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
 
-      {/* Journal + Add trade */}
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <JournalPanel compact runId={accountId} />
@@ -854,7 +877,6 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* trades table */}
       <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
         <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
         <div className="overflow-auto">
@@ -872,7 +894,7 @@ export default function TraderLab() {
                 <Th style={{width:90}}>Journal</Th>
                 <Th style={{width:150}}>Mistakes</Th>
                 <Th style={{width:130}}>Strategy</Th>
-                <Th style={{width:90}}>Notes</Th>
+                <Th style={{width:140}}>Notes</Th>
                 <Th style={{width:110}}>Attachment</Th>
                 <Th style={{width:90}}>Actions</Th>
               </tr>
@@ -890,11 +912,7 @@ export default function TraderLab() {
                   : [];
                 const pnl = pnlOf(t);
                 const rowNo = stats.filtered.length - idx;
-                const openNotes = () => {
-                  setNotesTitle(`#${t.id} • ${t.symbol || "—"} • ${t.date || "—"} ${t.trade_time?.slice(0,5)||""}`);
-                  setNotesContent(t.notes || "");
-                  setNotesOpen(true);
-                };
+
                 return (
                   <tr key={t.id} className="border-b align-top"
                       style={{borderColor:tokens.grid, background:rgba("#0ea5e9",0.045)}}
@@ -926,15 +944,20 @@ export default function TraderLab() {
 
                     <Td className="truncate" title={stratTxt}>{stratTxt || "—"}</Td>
 
-                    {/* Compact Notes: button opens modal */}
                     <Td>
-                      {(t.notes && t.notes.trim())
-                        ? <button
-                            className="px-2 py-1 text-xs rounded-md border"
-                            style={{borderColor:tokens.grid}}
-                            onClick={openNotes}
-                          >View</button>
-                        : <span style={{color:tokens.muted}}>—</span>}
+                      <div className="flex items-center gap-2">
+                        {(t.notes && t.notes.trim())
+                          ? <button
+                              className="px-2 py-1 text-xs rounded-md border"
+                              style={{borderColor:tokens.grid}}
+                              onClick={()=>openNotesEditor(t)}
+                            >Edit</button>
+                          : <button
+                              className="px-2 py-1 text-xs rounded-md border"
+                              style={{borderColor:tokens.grid}}
+                              onClick={()=>openNotesEditor(t)}
+                            >Add</button>}
+                      </div>
                     </Td>
 
                     <Td>
@@ -967,7 +990,6 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Account Manager (slimmer) */}
       {showMgr && (
         <AccountManager
           accounts={accounts}
@@ -987,19 +1009,21 @@ export default function TraderLab() {
         />
       )}
 
-      {/* Notes Modal */}
       {notesOpen && (
         <NotesModal
           title={notesTitle}
           content={notesContent}
+          setContent={setNotesContent}
           onClose={()=>setNotesOpen(false)}
+          onSave={saveNotes}
+          saving={savingNotes}
         />
       )}
     </div>
   );
 }
 
-/* ------------ UI atoms (safe/simple) ------------ */
+/* ------------ UI atoms ------------ */
 function KPI(props){
   return (
     <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
@@ -1009,17 +1033,14 @@ function KPI(props){
   );
 }
 function Th(props){
-  return <th className="py-2 pr-3 text[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
+  return <th className="py-2 pr-3 text-[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
 }
 function Td(props){
   return <td className={"py-1.5 pr-3 "+(props.className||"")}>{props.children}</td>;
 }
 
 function Input(props){
-  const handleChange = React.useCallback((e)=>{
-    if (props.onChange) props.onChange(e.target.value);
-  }, [props.onChange]);
-
+  const handleChange = React.useCallback((e)=>{ props.onChange?.(e.target.value); }, [props.onChange]);
   return (
     <div className={props.className || ""}>
       <label className="text-xs" style={{color:tokens.muted}}>{props.label}</label>
@@ -1035,10 +1056,7 @@ function Input(props){
 }
 
 function Select(props){
-  const handleChange = React.useCallback((e)=>{
-    if (props.onChange) props.onChange(e.target.value);
-  }, [props.onChange]);
-
+  const handleChange = React.useCallback((e)=>{ props.onChange?.(e.target.value); }, [props.onChange]);
   return (
     <div className={props.className || ""}>
       <label className="text-xs" style={{color:tokens.muted}}>{props.label}</label>
@@ -1107,8 +1125,8 @@ function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}
   );
 }
 
-/* ---- Notes Modal ---- */
-function NotesModal({ title, content, onClose }){
+/* ---- Notes Modal (editable) ---- */
+function NotesModal({ title, content, setContent, onClose, onSave, saving }){
   const copy = () => { try { navigator.clipboard.writeText(content || ""); } catch {} };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -1123,7 +1141,19 @@ function NotesModal({ title, content, onClose }){
           </div>
         </div>
         <div className="p-3 md:p-4">
-          <pre className="whitespace-pre-wrap text-sm leading-6" style={{color:"#e5edf7"}}>{content || "—"}</pre>
+          <textarea
+            className="qe-field w-full"
+            rows={12}
+            value={content}
+            onChange={(e)=>setContent?.(e.target.value)}
+            placeholder="Write notes for this trade (free text)."
+          />
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={onClose}>Cancel</button>
+            <button className="px-3 py-2 rounded-lg text-white text-sm disabled:opacity-60" style={{background:tokens.primary}} onClick={onSave} disabled={!!saving}>
+              {saving ? "Saving…" : "Save Notes"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
