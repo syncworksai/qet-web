@@ -97,14 +97,14 @@ async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
 
 /* ---------------- CSV → app field normalizer ---------------- */
 /**
- * MT4/5 & similar exports:
+ * Typical MT4/5 / cTrader export:
  * SYM, OPEN DATE, OPEN PRICE, CLOSE DATE, CLOSE PRICE, TYPE, STOP LOSS, TAKE PROFIT, LOTS, PROFIT, ...
- * Dates can be like 2025-10-0314:14:25 (no space/T). This maps to app fields.
+ * Dates can be like 2025-10-0314:14:25 (no space/T).
+ * Map them to: symbol, direction, size, entry_price, exit_price, fee, net_pnl, date, trade_time, notes+SL/TP
  */
 function normalizeImportedRow(tRaw) {
   const t = { ...(tRaw || {}) };
 
-  // helper: get first non-null from aliases (case insensitive)
   const get = (...aliases) => {
     for (const a of aliases) {
       if (t[a] != null) return t[a];
@@ -116,15 +116,12 @@ function normalizeImportedRow(tRaw) {
     return null;
   };
 
-  // symbol
   let symbol = get("symbol", "sym", "ticker");
   if (symbol) t.symbol = String(symbol).toUpperCase();
 
-  // direction (BUY/SELL → long/short)
   const type = String(get("direction", "type", "side") || "").toLowerCase();
   if (type) t.direction = /sell/.test(type) ? "short" : "long";
 
-  // sizes & prices
   const lots = get("size", "qty", "quantity", "lots", "contracts", "shares");
   if (lots != null && t.size == null) t.size = toNumberLoose(lots);
 
@@ -137,11 +134,9 @@ function normalizeImportedRow(tRaw) {
   const fee = get("fee", "commission", "fees");
   if (fee != null && t.fee == null) t.fee = toNumberLoose(fee) || 0;
 
-  // PROFIT → net_pnl so pnlOf() finds it
   const profit = get("net_pnl", "pnl", "profit", "net pl", "pl", "realized_pnl");
   if (profit != null && t.net_pnl == null) t.net_pnl = toNumberLoose(profit);
 
-  // SL/TP → append to notes
   const sl = get("stop_loss", "stop loss", "sl");
   const tp = get("take_profit", "take profit", "tp");
   const parts = [];
@@ -152,7 +147,7 @@ function normalizeImportedRow(tRaw) {
     t.notes = pre + parts.join(" | ");
   }
 
-  // date + time from OPEN DATE
+  // OPEN DATE → date + time (accepts “YYYY-MM-DDhh:mm:ss”, “YYYY-MM-DD hh:mm:ss”, “YYYY-MM-DDThh:mm:ss”)
   const od = String(get("open date", "open_date", "date", "timestamp") || "");
   if (od) {
     let ymd = "", hms = "00:00:00";
@@ -167,7 +162,6 @@ function normalizeImportedRow(tRaw) {
     if (ymd) { t.date = ymd; t.trade_time = hms; }
   }
 
-  // fallback symbol from SYM
   if (!t.symbol) {
     const s2 = get("sym");
     if (s2) t.symbol = String(s2).toUpperCase();
@@ -236,7 +230,6 @@ export default function TraderLab() {
   const [notice, setNotice] = useState(null);
 
   // NOTES MODAL
-  theadOpen
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesContent, setNotesContent] = useState("");
   const [notesTitle, setNotesTitle] = useState("");
@@ -271,12 +264,10 @@ export default function TraderLab() {
     }catch(e){ console.error("loadAccounts",e); }
   }
 
-  // ✅ fetch & normalize trades so charts/KPIs work after CSV import
   const fetchTrades = async (id) => {
     try{
       const {data} = await api.get("/api/journal/backtests/trades/", { params: { run: id } });
-      const rows = Array.isArray(data) ? data : [];
-      return rows.map(normalizeImportedRow);
+      return Array.isArray(data) ? data : [];
     }catch(e){
       console.error("fetchTrades", e);
       return [];
@@ -339,7 +330,6 @@ export default function TraderLab() {
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      // Retry/poll until backend has finished ingesting
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
@@ -492,7 +482,10 @@ export default function TraderLab() {
   const pnlOf = (t)=> pnlOfRaw(t) * (Number.isFinite(pnlMult)?pnlMult:1);
 
   const stats = useMemo(()=>{
-    const allRows = trades||[];
+    // ✅ Normalize all rows first so CSVs with odd headers compute correctly
+    const normalizedAll = (trades || []).map(normalizeImportedRow);
+    const allRows = normalizedAll;
+
     const filtered = monthFilter==="all" ? allRows : allRows.filter(t=> String(t.date||"").startsWith(monthFilter));
 
     const withOutcome = filtered.map(t=>{
@@ -552,7 +545,7 @@ export default function TraderLab() {
     const dowChart = dow.map((d,i)=> ({ name:names[i], trades:d.trades, winRate: d.trades ? (d.wins/d.trades*100) : 0, pnl:d.pnl }));
     let bestDay = null;
     for (let i=0;i<dow.length;i++){
-      const wr = dow[i].trades ? (d.wins/d.trades) : 0;
+      const wr = dow[i].trades ? (dow[i].wins/dow[i].trades) : 0;
       if (!bestDay || wr > bestDay.wr) bestDay = { label:names[i], wr: Math.round(wr*100) };
     }
 
@@ -597,6 +590,7 @@ export default function TraderLab() {
         <div className="flex flex-wrap gap-2 items-center">
           <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} onClick={createAccount}>New Account</button>
 
+          {/* slimmer account selects */}
           <select
             className="qe-select text-sm"
             value={accountId}
@@ -662,6 +656,7 @@ export default function TraderLab() {
         </div>
       )}
 
+      {/* CSV preview actions */}
       {csvPreviewRows && (
         <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
@@ -677,7 +672,7 @@ export default function TraderLab() {
               </select>
               <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} disabled={importing} onClick={importCsvIntoCurrent}>{importing?"Importing…":"Import to Account"}</button>
               <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={createAccountAndImport}>Create Account & Import</button>
-              <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>Discard</button>
+              <button className="px-3 py-2 rounded/lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>{ setCsvPreviewRows(null); setCsvFile(null); }}>Discard</button>
             </div>
           </div>
           <CsvPreview rows={csvPreviewRows}/>
@@ -809,7 +804,7 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Lot size panel (same trades for consistency) */}
+      {/* Lot size panel */}
       <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
 
       {/* Journal + Add trade */}
@@ -859,7 +854,7 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* trades table — compact & professional */}
+      {/* trades table */}
       <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
         <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
         <div className="overflow-auto">
@@ -1004,7 +999,7 @@ export default function TraderLab() {
   );
 }
 
-/* ------------ UI atoms ------------ */
+/* ------------ UI atoms (safe/simple) ------------ */
 function KPI(props){
   return (
     <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
@@ -1014,7 +1009,7 @@ function KPI(props){
   );
 }
 function Th(props){
-  return <th className="py-2 pr-3 text-[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
+  return <th className="py-2 pr-3 text[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
 }
 function Td(props){
   return <td className={"py-1.5 pr-3 "+(props.className||"")}>{props.children}</td>;

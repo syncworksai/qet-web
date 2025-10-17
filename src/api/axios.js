@@ -50,7 +50,7 @@ function normalizeUrl(url) {
         abs.hostname === base.hostname &&
         abs.port === base.port;
 
-      if (!sameHost) return u; // third-party host
+      if (!sameHost) return u; // third-party host — leave untouched
 
       const match = abs.pathname.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/);
       let path = match?.[1] ?? "";
@@ -67,7 +67,7 @@ function normalizeUrl(url) {
     }
   }
 
-  // Relative
+  // Relative path
   const match = u.match(/^([^?#]*)(\?[^#]*)?(#.*)?$/);
   let path = match?.[1] ?? "";
   const query = match?.[2] ?? "";
@@ -107,7 +107,11 @@ api.interceptors.request.use((cfg) => {
       return null;
     }
   })();
-  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  if (token) {
+    // keep single "Bearer " prefix
+    const val = String(token).startsWith("Bearer ") ? token : `Bearer ${token}`;
+    cfg.headers.Authorization = val;
+  }
   return cfg;
 });
 
