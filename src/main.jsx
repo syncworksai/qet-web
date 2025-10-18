@@ -6,6 +6,9 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./styles/qe-fields.css"; // ← dark-themed inputs/selects/tooltips
 
+// Boot axios globals (API_BASE, interceptors, window.__QE, etc.)
+import "./api/axios";
+
 // App
 import App from "./App.jsx";
 
