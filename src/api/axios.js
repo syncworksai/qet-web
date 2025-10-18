@@ -210,3 +210,12 @@ export const apiPath = (p) => {
 
 export const apiNoAuth = apiPublic;
 export default api;
+// near the bottom of axios.js
+if (typeof window !== "undefined") {
+  window.__QE = {
+    API_BASE,
+    ENV_BASE,
+    isLocal,
+    axiosApiBase: api.defaults.baseURL,
+  };
+}
