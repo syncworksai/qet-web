@@ -28,10 +28,8 @@ const tokens = {
   charts: ["#6366f1","#22c55e","#eab308","#ef4444","#06b6d4","#a855f7","#f97316","#14b8a6","#84cc16","#10b981","#fb7185","#60a5fa"],
 };
 function rgba(hex, a){
-  const h=hex.replace("#","");
-  const s = h.length===3 ? h.split("").map(c=>c+c).join("") : h;
-  const n=parseInt(s,16);
-  const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  const h=hex.replace("#",""); const s = h.length===3 ? h.split("").map(c=>c+c).join("") : h;
+  const n=parseInt(s,16); const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
   return `rgba(${r},${g},${b},${a})`;
 }
 function winRateColor(rate){
@@ -70,10 +68,19 @@ function pickFromNotes(notes, labels) {
   return null;
 }
 
-/** 0=Mon..6=Sun */
-function jsDowIndex(isoDate) {
-  const dt = new Date(isoDate+"T00:00:00");
-  return (dt.getDay()+6)%7;
+/** Build a shifted Date and derived parts using tzShift (hours). */
+function shiftedWhen(dateStr, timeStr, tzShiftHours) {
+  const hhmmss = (timeStr && /^\d{2}:\d{2}(:\d{2})?$/.test(timeStr)) ? (timeStr.length===5?timeStr+":00":timeStr) : "00:00:00";
+  // Treat source as local, then add shift
+  const base = new Date(`${dateStr}T${hhmmss}`);
+  if (isNaN(base.getTime())) return null;
+  const d = new Date(base.getTime() + (Number(tzShiftHours)||0) * 3600 * 1000);
+  const y = d.getFullYear(); const m = d.getMonth(); const dd = d.getDate();
+  const hour = d.getHours(); const dowSun0 = d.getDay();
+  // Convert to Mon=0 .. Sun=6 to match UI ordering
+  const dowMon0 = (dowSun0 + 6) % 7;
+  const dateShiftedStr = `${y}-${String(m+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+  return { js: d, year:y, month:m, day:dd, hour, dowMon0, monthKey: `${y}-${String(m+1).padStart(2,"0")}`, dateShiftedStr, timeShiftedStr: `${String(hour).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` };
 }
 
 /** small wait */
@@ -96,12 +103,6 @@ async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
 }
 
 /* -------- CSV header flexibility (DEAL is optional/ignored) -------- */
-/**
- * Many MT4/5 and cTrader exports look like:
- * SYM, OPEN DATE, OPEN PRICE, CLOSE DATE, CLOSE PRICE, TYPE, STOP LOSS, TAKE PROFIT, LOTS, PROFIT, ...
- * Dates can be like 2025-10-0314:14:25 (no space/T).
- * We only use this for local preview and to show users the mapping works; the server import does its own parse.
- */
 function normalizeImportedRow(tRaw) {
   const t = { ...(tRaw || {}) };
   const get = (...aliases) => {
@@ -316,7 +317,6 @@ export default function TraderLab() {
       header: true, skipEmptyLines: true,
       complete: res=>{
         const raw = res.data || [];
-        // show a normalized preview so users see what will be used
         const normalized = raw.map(normalizeImportedRow);
         setCsvPreviewRows(normalized);
       },
@@ -333,7 +333,6 @@ export default function TraderLab() {
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      // Retry-poll until trades show up
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
@@ -359,7 +358,6 @@ export default function TraderLab() {
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
       const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
-      // Retry-poll after creating new account
       const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
       setTrades(rows);
       await loadAccounts(newId);
@@ -445,7 +443,11 @@ export default function TraderLab() {
   // open editable notes modal for a trade
   function openNotesEditor(t){
     setNotesTradeId(t.id);
-    setNotesTitle(`#${t.id} • ${t.symbol || "—"} • ${t.date || "—"} ${t.trade_time?.slice(0,5)||""}`);
+    const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
+    const when = shiftedWhen(t.date, t.trade_time, shift);
+    const ds = when ? when.dateShiftedStr : (t.date || "—");
+    const ts = when ? when.timeShiftedStr : (t.trade_time?.slice(0,5) || "");
+    setNotesTitle(`#${t.id} • ${t.symbol || "—"} • ${ds} ${ts}`);
     setNotesContent(t.notes || "");
     setNotesOpen(true);
   }
@@ -465,15 +467,16 @@ export default function TraderLab() {
     }
   }
 
+  // Build month options from **shifted** dates
   const monthOptions = useMemo(()=>{
+    const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
     const set = new Set();
     (trades||[]).forEach(t=>{
-      if(!t.date) return;
-      const parts = String(t.date).split("-");
-      if(parts.length>=2) set.add(parts[0]+"-"+parts[1]);
+      const w = shiftedWhen(t.date, t.trade_time, shift);
+      if (w) set.add(w.monthKey);
     });
     return ["all"].concat(Array.from(set).sort().reverse());
-  }, [trades]);
+  }, [trades, tzShift]);
 
   useEffect(()=>{ try { localStorage.setItem(LAST_MONTH_FILTER_KEY, monthFilter); } catch {} }, [monthFilter]);
   useEffect(()=>{ try { localStorage.setItem(LAST_TZ_KEY, String(tzShift)); } catch {} }, [tzShift]);
@@ -511,7 +514,17 @@ export default function TraderLab() {
 
   const stats = useMemo(()=>{
     const allRows = trades||[];
-    const filtered = monthFilter==="all" ? allRows : allRows.filter(t=> String(t.date||"").startsWith(monthFilter));
+    const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
+
+    // normalize with shifted date/hour
+    const normalized = allRows.map(t => {
+      const w = shiftedWhen(t.date, t.trade_time, shift);
+      return { ...t, __when: w }; // may be null if bad date
+    }).filter(t => t.__when); // keep only valid dates
+
+    const filtered = monthFilter==="all"
+      ? normalized
+      : normalized.filter(t => t.__when.monthKey === monthFilter);
 
     const withOutcome = filtered.map(t=>{
       let isWin = t.is_win;
@@ -539,9 +552,7 @@ export default function TraderLab() {
 
     const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0}));
     withOutcome.forEach(t=>{
-      if(!t.trade_time) return;
-      const hh = Number(String(t.trade_time).split(":")[0]);
-      if(!(hh>=0&&hh<=23)) return;
+      const hh = t.__when.hour;
       const b = buckets[hh];
       b.trades += 1;
       if (hh<12) b.am += 1; else b.pm += 1;
@@ -561,8 +572,7 @@ export default function TraderLab() {
     const dow = Array.from({length:7},()=>({trades:0,wins:0,pnl:0}));
     const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     withOutcome.forEach(t=>{
-      if(!t.date) return;
-      const i = jsDowIndex(t.date);
+      const i = t.__when.dowMon0;
       dow[i].trades += 1;
       if (t.__is_win===true) dow[i].wins += 1;
       dow[i].pnl += pnlOf(t);
@@ -574,7 +584,7 @@ export default function TraderLab() {
       if (!bestDay || wr > bestDay.wr) bestDay = { label:names[i], wr: Math.round(wr*100) };
     }
 
-    const uniqueDays = new Set(withOutcome.map(t=>t.date).filter(Boolean));
+    const uniqueDays = new Set(withOutcome.map(t=>t.__when.dateShiftedStr).filter(Boolean));
     const avgPerDay = uniqueDays.size ? (totals.net / uniqueDays.size) : 0;
 
     let sumScore = 0, countScore = 0;
@@ -599,8 +609,8 @@ export default function TraderLab() {
     const topFlags = Object.keys(flagCounts).map(k=>({key:k, count:flagCounts[k]})).sort((a,b)=>b.count-a.count).slice(0,3);
     const topMistakes = Object.keys(mistakeCounts).map(k=>({key:k, count:mistakeCounts[k]})).sort((a,b)=>b.count-a.count).slice(0,5);
 
-    return { filtered: withOutcome, totals, winRate, pie, hourData, avgJournal, topFlags, topMistakes, dowChart, bestDay, avgPerDay };
-  }, [trades, monthFilter, pnlMult]);
+    return { filtered: withOutcome, totals, winRate, pie, hourData, avgJournal, topFlags, topMistakes, dowChart, bestDay, avgPerDay, shift };
+  }, [trades, monthFilter, pnlMult, tzShift]);
 
   /* ---------- UI ---------- */
   return (
@@ -630,9 +640,18 @@ export default function TraderLab() {
             className="qe-select text-sm"
             value={monthFilter}
             onChange={(e)=>setMonthFilter(e.target.value)}
-            title="Filter by month"
+            title="Filter by month (shifted)"
           >
             {monthOptions.map(opt=> <option key={opt} value={opt}>{opt==="all" ? "All months" : opt}</option>)}
+          </select>
+
+          <select
+            className="qe-select text-sm"
+            value={tzShift}
+            onChange={(e)=>setTzShift(Number(e.target.value))}
+            title="Apply hour shift to bucketing/preview and when importing"
+          >
+            {TZ_CHOICES.map(z=> <option key={String(z.value)} value={z.value}>{z.label}</option>)}
           </select>
 
           <div className="flex items-center gap-2">
@@ -689,7 +708,7 @@ export default function TraderLab() {
                 className="qe-select text-sm"
                 value={tzShift}
                 onChange={(e)=>setTzShift(Number(e.target.value))}
-                title="Apply this hour shift to timestamps while importing"
+                title="Apply this hour shift while importing"
               >
                 {TZ_CHOICES.map(z=> <option key={String(z.value)} value={z.value}>{z.label}</option>)}
               </select>
@@ -913,14 +932,17 @@ export default function TraderLab() {
                 const pnl = pnlOf(t);
                 const rowNo = stats.filtered.length - idx;
 
+                const ds = t.__when?.dateShiftedStr || t.date || "—";
+                const ts = t.__when?.timeShiftedStr || (t.trade_time ? String(t.trade_time).slice(0,5) : "—");
+
                 return (
                   <tr key={t.id} className="border-b align-top"
                       style={{borderColor:tokens.grid, background:rgba("#0ea5e9",0.045)}}
                       onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.085);}}
                       onMouseLeave={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.045);}}>
                     <Td><span className="px-2 py-0.5 text-[11px] rounded-md" style={{background:"#1f2937", color:"#d1d5db"}} title={"Trade id "+t.id}>{rowNo}</span></Td>
-                    <Td>{t.date ? new Date(String(t.date)+"T00:00:00").toLocaleDateString() : "—"}</Td>
-                    <Td>{t.trade_time ? String(t.trade_time).slice(0,5) : "—"}</Td>
+                    <Td>{ds ? new Date(ds+"T00:00:00").toLocaleDateString() : "—"}</Td>
+                    <Td>{ts}</Td>
                     <Td className="truncate" title={t.symbol || ""}>{t.symbol}</Td>
                     <Td>
                       <span className="px-1.5 py-0.5 text-[11px] rounded-md"
