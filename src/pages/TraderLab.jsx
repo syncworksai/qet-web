@@ -5,7 +5,7 @@ import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
-import { api } from "../api/axios";
+import api, { apiPath } from "../api/axios"; // <- default + apiPath
 import JournalPanel from "../components/JournalPanel";
 import LotSizePanel from "../components/LotSizePanel.jsx";
 
@@ -57,6 +57,7 @@ function toNumberLoose(x) {
 /** Extract a numeric value from the notes by a list of labels */
 function pickFromNotes(notes, labels) {
   const txt = String(notes || "");
+  // 1) direct labels like: PNL: $123.45  |  Net P&L = (12.3)
   for (const lab of labels) {
     const re = new RegExp(`${lab}\\s*[:=]?\\s*([\\$\\(\\)\\-0-9.,]+)`, "i");
     const m = txt.match(re);
@@ -65,19 +66,23 @@ function pickFromNotes(notes, labels) {
       if (v !== null) return v;
     }
   }
+  // 2) CSV Profit/Loss lines e.g. "CSV Profit/Loss raw: ($12.34)"
+  const mCsv = txt.match(/CSV\s+Profit\/Loss(?:\s+raw)?\s*[:=]\s*([\$\(\)\-0-9.,]+)/i);
+  if (mCsv && mCsv[1] != null) {
+    const v = toNumberLoose(mCsv[1]);
+    if (v !== null) return v;
+  }
   return null;
 }
 
 /** Build a shifted Date and derived parts using tzShift (hours). */
 function shiftedWhen(dateStr, timeStr, tzShiftHours) {
   const hhmmss = (timeStr && /^\d{2}:\d{2}(:\d{2})?$/.test(timeStr)) ? (timeStr.length===5?timeStr+":00":timeStr) : "00:00:00";
-  // Treat source as local, then add shift
   const base = new Date(`${dateStr}T${hhmmss}`);
   if (isNaN(base.getTime())) return null;
   const d = new Date(base.getTime() + (Number(tzShiftHours)||0) * 3600 * 1000);
   const y = d.getFullYear(); const m = d.getMonth(); const dd = d.getDate();
   const hour = d.getHours(); const dowSun0 = d.getDay();
-  // Convert to Mon=0 .. Sun=6 to match UI ordering
   const dowMon0 = (dowSun0 + 6) % 7;
   const dateShiftedStr = `${y}-${String(m+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
   return { js: d, year:y, month:m, day:dd, hour, dowMon0, monthKey: `${y}-${String(m+1).padStart(2,"0")}`, dateShiftedStr, timeShiftedStr: `${String(hour).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` };
@@ -233,6 +238,10 @@ export default function TraderLab() {
   const [notesTradeId, setNotesTradeId] = useState(null);
   const [savingNotes, setSavingNotes] = useState(false);
 
+  // retry key for first-call-after-refresh
+  const [reloadKey, setReloadKey] = useState(0);
+  const reloadKeyRef = useRef(0);
+
   const flash = (type, text)=>{ setNotice({type, text}); setTimeout(()=>setNotice(null), 2400); };
 
   function updateForm(patch){
@@ -242,7 +251,7 @@ export default function TraderLab() {
   useEffect(()=>{ loadAccounts(); }, []);
   async function loadAccounts(prefer=""){
     try{
-      const {data} = await api.get("/api/journal/backtests/runs/");
+      const {data} = await api.get(apiPath("/journal/backtests/runs"));
       const list = data || [];
       setAccounts(list);
       let stored = ""; try{ stored = localStorage.getItem(LAST_ACCOUNT_KEY)||""; }catch(e){}
@@ -265,7 +274,8 @@ export default function TraderLab() {
 
   const fetchTrades = async (id) => {
     try{
-      const {data} = await api.get("/api/journal/backtests/trades/", { params: { run: id } });
+      // use apiPath to lock under /api and keep trailing slash
+      const {data} = await api.get(apiPath(`/journal/backtests/trades?run=${id}`));
       return Array.isArray(data) ? data : [];
     }catch(e){
       console.error("fetchTrades", e);
@@ -278,16 +288,29 @@ export default function TraderLab() {
     try{
       const rows = await fetchTrades(id);
       setTrades(rows);
-    }finally{
+    } catch (e) {
+      // If this was a 401, axios has already tried refresh; attempt one more read
+      if (e?.response?.status === 401) {
+        setTimeout(() => {
+          reloadKeyRef.current += 1;
+          setReloadKey(reloadKeyRef.current);
+        }, 0);
+      }
+    } finally{
       setLoading(false);
     }
   }
+  // trigger re-read after refresh
+  useEffect(() => {
+    if (accountId) loadTrades(accountId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reloadKey]);
 
   async function createAccount(){
     const name = window.prompt("Account name?");
     if(!name) return;
     try{
-      const {data} = await api.post("/api/journal/backtests/runs/", { name });
+      const {data} = await api.post(apiPath("/journal/backtests/runs"), { name });
       await loadAccounts(String(data.id));
       flash("ok","Account created");
     }catch{ window.alert("Failed to create account."); }
@@ -296,7 +319,7 @@ export default function TraderLab() {
     const name = window.prompt("Rename account:");
     if(!name) return;
     try{
-      await api.patch("/api/journal/backtests/runs/"+id+"/", { name });
+      await api.patch(apiPath(`/journal/backtests/runs/${id}`), { name });
       await loadAccounts(String(id));
       flash("ok","Renamed");
     }catch{ window.alert("Rename failed"); }
@@ -304,7 +327,7 @@ export default function TraderLab() {
   async function deleteAccount(id){
     if(!window.confirm("Delete this account and ALL its trades?")) return;
     try{
-      await api.delete("/api/journal/backtests/runs/"+id+"/");
+      await api.delete(apiPath(`/journal/backtests/runs/${id}`));
       await loadAccounts("");
       flash("ok","Account deleted");
     }catch{ window.alert("Delete failed"); }
@@ -332,7 +355,7 @@ export default function TraderLab() {
       fd.append("file", csvFile);
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
-      const { data } = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      const { data } = await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
@@ -349,7 +372,7 @@ export default function TraderLab() {
     if(!csvFile) return;
     const name = window.prompt("New account name (from CSV):", csvFile.name.replace(/\.[^/.]+$/, "")); if(!name) return;
     try{
-      const {data} = await api.post("/api/journal/backtests/runs/", { name });
+      const {data} = await api.post(apiPath("/journal/backtests/runs"), { name });
       const newId = String(data.id);
       setAccountId(newId);
       try{ localStorage.setItem(LAST_ACCOUNT_KEY, newId); }catch{}
@@ -357,7 +380,7 @@ export default function TraderLab() {
       fd.append("file", csvFile);
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
-      const resp = await api.post("/api/journal/backtests/import_csv/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+      const resp = await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
       const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
       setTrades(rows);
       await loadAccounts(newId);
@@ -400,9 +423,9 @@ export default function TraderLab() {
         fd.append("fee", form.fee || 0);
         fd.append("notes", notes);
         fd.append("attachment", attachFile);
-        await api.post("/api/journal/backtests/trades/", fd, { headers: { "Content-Type":"multipart/form-data" }});
+        await api.post(apiPath("/journal/backtests/trades"), fd, { headers: { "Content-Type":"multipart/form-data" }});
       } else {
-        await api.post("/api/journal/backtests/trades/", {
+        await api.post(apiPath("/journal/backtests/trades"), {
           run: Number(accountId),
           date: form.date || new Date().toISOString().slice(0,10),
           trade_time,
@@ -427,20 +450,20 @@ export default function TraderLab() {
   }
   async function deleteTrade(id){
     if(!window.confirm("Delete this trade?")) return;
-    try{ await api.delete("/api/journal/backtests/trades/"+id+"/"); await loadTrades(accountId); }catch{ window.alert("Delete failed"); }
+    try{ await api.delete(apiPath(`/journal/backtests/trades/${id}`)); await loadTrades(accountId); }catch{ window.alert("Delete failed"); }
   }
   async function uploadAttachment(tradeId, file){
     if(!file) return;
     const fd=new FormData(); fd.append("attachment", file);
-    try{ await api.patch("/api/journal/backtests/trades/"+tradeId+"/", fd, { headers: { "Content-Type":"multipart/form-data" }}); await loadTrades(accountId); }
+    try{ await api.patch(apiPath(`/journal/backtests/trades/${tradeId}`), fd, { headers: { "Content-Type":"multipart/form-data" }}); await loadTrades(accountId); }
     catch{ window.alert("Upload failed"); }
   }
   async function removeAttachment(tradeId){
-    try{ await api.post("/api/journal/backtests/trades/"+tradeId+"/remove-attachment/"); await loadTrades(accountId); }
+    try{ await api.post(apiPath(`/journal/backtests/trades/${tradeId}/remove-attachment`)); await loadTrades(accountId); }
     catch{ window.alert("Remove failed"); }
   }
 
-  // open editable notes modal for a trade
+  // editable notes modal
   function openNotesEditor(t){
     setNotesTradeId(t.id);
     const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
@@ -455,7 +478,7 @@ export default function TraderLab() {
     if (!notesTradeId) return;
     setSavingNotes(true);
     try{
-      await api.patch(`/api/journal/backtests/trades/${notesTradeId}/`, { notes: notesContent || "" });
+      await api.patch(apiPath(`/journal/backtests/trades/${notesTradeId}`), { notes: notesContent || "" });
       setNotesOpen(false);
       await loadTrades(accountId);
       flash("ok","Notes updated");
@@ -495,9 +518,9 @@ export default function TraderLab() {
       }
     }
     const fromNotes = pickFromNotes(t?.notes, [
-      "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS"
+  "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS","RESULT PNL"
     ]);
-    if (fromNotes !== null) return fromNotes;
+if (fromNotes !== null) return fromNotes;
 
     const entry = toNumberLoose(t?.entry_price);
     const exit  = toNumberLoose(t?.exit_price);
@@ -611,6 +634,16 @@ export default function TraderLab() {
 
     return { filtered: withOutcome, totals, winRate, pie, hourData, avgJournal, topFlags, topMistakes, dowChart, bestDay, avgPerDay, shift };
   }, [trades, monthFilter, pnlMult, tzShift]);
+
+  // Dev diagnostics
+  useEffect(() => {
+    if (typeof window !== "undefined" && import.meta?.env?.DEV) {
+      window.__STORE = {
+        tradesGet: () => trades,
+        state: { trades, accounts, accountId },
+      };
+    }
+  }, [trades, accounts, accountId]);
 
   /* ---------- UI ---------- */
   return (
@@ -1005,7 +1038,7 @@ export default function TraderLab() {
                 );
               })}
               {(!stats.filtered || stats.filtered.length===0) && (
-                <tr><td className="py-4" style={{color:tokens.muted}} colSpan={14}>{loading?"Loading…":"No trades yet."}</td></tr>
+                <tr><td className="py-4" style={{color:tokens.muted}} colSpan={14}>{loading?"Loading…":"No trades yet. Try uploading a CSV."}</td></tr>
               )}
             </tbody>
           </table>

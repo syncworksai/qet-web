@@ -3,6 +3,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
+import WhyTeach from "../components/WhyTeach.jsx"; // <-- make sure this file exists
 
 /**
  * Marketing + Login page
@@ -129,6 +130,9 @@ export default function LoginPage() {
           </a>
 
           <SocialRow />
+
+          {/* Story section */}
+          <WhyTeach />
         </section>
 
         {/* RIGHT: Sign In */}
@@ -305,7 +309,7 @@ function FormField({ label, value, onChange, type = "text", autoComplete }) {
 /* --------- Minimal inline icons --------- */
 function YouTubeIcon({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none">
       <rect x="2" y="6" width="20" height="12" rx="3" stroke="#22d3ee" strokeWidth="1.5" />
       <path d="M10 9.5v5l5-2.5-5-2.5z" fill="#22d3ee" />
     </svg>
@@ -313,7 +317,7 @@ function YouTubeIcon({ size = 16 }) {
 }
 function InstagramIcon({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none">
       <rect x="4" y="4" width="16" height="16" rx="4" stroke="#22d3ee" strokeWidth="1.5" />
       <circle cx="12" cy="12" r="3.5" stroke="#22d3ee" strokeWidth="1.5" />
       <circle cx="17.5" cy="6.5" r="1" fill="#22d3ee" />
@@ -322,7 +326,7 @@ function InstagramIcon({ size = 16 }) {
 }
 function TikTokIcon({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none">
       <path d="M14 4c.3 2.3 1.6 4 4 4" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
       <path d="M14 9v6.5a4.5 4.5 0 1 1-3-4.24" stroke="#22d3ee" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
@@ -330,7 +334,7 @@ function TikTokIcon({ size = 16 }) {
 }
 function FacebookIcon({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden fill="none">
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none">
       <path d="M13 10h3V7h-3c-1.7 0-3 1.3-3 3v7h3v-4h2.5l.5-3H13v-1c0-.6.4-1 1-1z" fill="#22d3ee" />
       <rect x="3" y="3" width="18" height="18" rx="4" stroke="#22d3ee" strokeWidth="1.5" />
     </svg>
