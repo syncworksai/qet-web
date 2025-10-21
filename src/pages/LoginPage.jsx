@@ -3,10 +3,10 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
-import WhyTeach from "../components/WhyTeach.jsx"; // <-- ensure this exists
+import WhyTeach from "../components/WhyTeach.jsx";
 
 /**
- * Marketing + Login page
+ * Marketing + Login page (revamped)
  */
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -18,27 +18,22 @@ export default function LoginPage() {
 
   const WEBINARS = useMemo(() => [], []);
 
-  // PTB link (unchanged)
   const PTB_URL =
     "https://dashboard.plutustradebase.com/challenges?affiliateId=quantumedge.fx";
 
-  // Booking links
-  const BOOKING_PAGE = "https://calendar.app.google/GBw1pWs4cs1CQSYq5"; // opens their native booking page
-  const BOOKING_EMBED =
-    "https://calendar.google.com/calendar/appointments/schedules/AcZssZ0vefJPjY1lSYg2NjwZwOS81xtRHuv6ttWsM0ivFz8hBMb7PbWrhzYLyYP-qs3jxf3jaFNjvCQK?gv=true"; // iframe embed
+  // Community Chat (Stripe Payment Link)
+  const COMMUNITY_CHAT_URL = "https://buy.stripe.com/28EbJ19uygPtaT7ct52Nq07";
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setBusy(true);
     try {
-      // Support username OR email
       const looksLikeEmail = /\S+@\S+\.\S+/.test(username);
       const payload = looksLikeEmail
         ? { email: username, password }
         : { username, password };
 
-      // Use helper to guarantee /api/users/token/
       const res = await apiNoAuth.post(apiPath("users/token/"), payload);
       const { access, refresh } = res.data || {};
       if (!access || !refresh) throw new Error("No tokens returned");
@@ -64,21 +59,29 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen px-4 md:px-6 lg:px-8 py-8">
-      <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-7">
+      <div className="max-w-7xl mx-auto grid lg:grid-cols-[1.25fr_.9fr] gap-8">
         {/* LEFT — marketing column */}
-        <section className="space-y-6 order-2 lg:order-1">
+        <section className="space-y-6">
+          {/* Hero */}
           <div className="rounded-2xl p-6 md:p-7 border border-white/10 bg-[color:var(--card,#0A0F16)]">
-            <div className="flex items-center gap-3 mb-3">
+            <div className="flex items-center gap-3 mb-4">
               <img src={logo} alt="QuantumEdge" className="h-9" />
               <h1 className="text-2xl md:text-3xl font-semibold text-neutral-100">
                 Trade with a system.{" "}
                 <span className="text-cyan-300">Improve with data.</span>
               </h1>
             </div>
+
             <p className="text-sm md:text-base text-neutral-400 leading-relaxed">
               QuantumEdge brings together <span className="text-neutral-200">TraderLab</span>, journaling,
               analytics, psych profile, charts, and the FX calendar—designed to help you repeat what works.
             </p>
+
+            {/* Coaching note */}
+            <div className="mt-4 text-[13px] text-neutral-300">
+              <span className="font-medium text-cyan-300">Coaching:</span>{" "}
+              Need a plan, accountability, and feedback? Book a consultation below and we’ll map your next month.
+            </div>
 
             <div className="grid sm:grid-cols-2 gap-3 mt-5">
               <ValueCard title="TraderLab">P&amp;L + hour-of-day win%, attachments, notes.</ValueCard>
@@ -104,11 +107,16 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Booking (readable on dark) */}
+          <BookingCard communityUrl={COMMUNITY_CHAT_URL} />
+
+          {/* Community Chat direct card */}
+          <CommunityChatCard href={COMMUNITY_CHAT_URL} />
+
+          {/* Webinars (kept minimal) */}
           <WebinarSchedule items={WEBINARS} />
 
-          {/* Booking card (iframe embed + fallback button) */}
-          <BookingCard embedUrl={BOOKING_EMBED} pageUrl={BOOKING_PAGE} />
-
+          {/* PTB affiliate */}
           <a
             href={PTB_URL}
             target="_blank"
@@ -140,14 +148,11 @@ export default function LoginPage() {
           </a>
 
           <SocialRow />
-
-          {/* Keep WhyTeach LAST so on mobile it appears AFTER the sign-in card */}
-          <WhyTeach />
         </section>
 
-        {/* RIGHT — sign-in column */}
-        <aside className="order-1 lg:order-2 lg:pl-2">
-          <div className="w-full max-w-md ml-auto rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+        {/* RIGHT — sign-in */}
+        <aside>
+          <div className="w-full max-w-md ml-auto rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)] sticky top-6">
             <div className="mb-5">
               <div className="text-sm text-neutral-400">Welcome back</div>
               <h2 className="text-xl font-semibold text-neutral-100">Sign in</h2>
@@ -196,11 +201,18 @@ export default function LoginPage() {
                 </Link>
               </div>
               <div className="text-xs text-neutral-500">
-                Tip: Use the <b>same email</b> on checkout and registration for smooth access.
+                Tip: Use the <b>same email</b> on registration and checkout for smooth access.
               </div>
             </div>
           </div>
         </aside>
+      </div>
+
+      {/* Why I Teach — big block at very bottom */}
+      <div className="max-w-7xl mx-auto mt-8">
+        <div className="rounded-2xl p-6 md:p-8 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+          <WhyTeach />
+        </div>
       </div>
     </div>
   );
@@ -208,43 +220,95 @@ export default function LoginPage() {
 
 /* ----------------- Sub-components ----------------- */
 
-function BookingCard({ embedUrl, pageUrl }) {
+function BookingCard({ communityUrl }) {
   return (
-    <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+    <div className="rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)]">
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-sm uppercase tracking-wide text-neutral-400">
-            Book a Call
+            Book a call
           </div>
-          <div className="text-lg font-semibold text-neutral-100">Schedule with Quantum Edge</div>
+          <div className="text-lg font-semibold text-neutral-100">
+            Schedule with Quantum Edge
+          </div>
         </div>
         <a
-          href={pageUrl}
+          href="https://calendar.app.google/GBw1pWs4cs1CQSYq5"
           target="_blank"
           rel="noreferrer"
-          className="text-sm px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
-          title="Open booking in new tab"
+          className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
         >
           Open in new tab
         </a>
       </div>
 
-      {/* Responsive iframe */}
-      <div className="rounded-lg overflow-hidden border border-white/10">
-        <iframe
-          src={embedUrl}
-          title="Quantum Edge Booking"
-          style={{ border: 0 }}
-          width="100%"
-          height="600"
-          frameBorder="0"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
+      {/* Light surface behind the iframe so it’s readable on dark themes */}
+      <div className="rounded-xl overflow-hidden border border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+        <div className="bg-white text-black">
+          <iframe
+            title="QE Booking"
+            src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ0vefJPjY1lSYg2NjwZwOS81xtRHuv6ttWsM0ivFz8hBMb7PbWrhzYLyYP-qs3jxf3jaFNjvCQK?gv=true"
+            style={{ border: 0 }}
+            width="100%"
+            height="640"
+            frameBorder="0"
+          />
+        </div>
       </div>
 
-      <div className="mt-2 text-xs text-neutral-500">
+      <div className="mt-3 text-xs text-neutral-400">
         If the embed doesn’t load, use the button above to open the booking page.
+      </div>
+
+      {/* Small CTA row below booking */}
+      <div className="mt-5 grid sm:grid-cols-2 gap-3">
+        <Link
+          to="/pricing"
+          className="text-center px-4 py-2 rounded-xl border border-white/10 text-neutral-200 hover:bg-white/5"
+        >
+          View coaching & plans
+        </Link>
+        {communityUrl && (
+          <a
+            href={communityUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-center px-4 py-2 rounded-xl bg-[color:var(--accent)] font-semibold hover:opacity-90"
+            style={{ color: "#0B0F16" }}
+          >
+            Join Community Chat ($20)
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CommunityChatCard({ href }) {
+  if (!href) return null;
+  return (
+    <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm uppercase tracking-wide text-neutral-400">
+            Community
+          </div>
+          <div className="text-lg font-semibold text-neutral-100">
+            Trader Community Chat
+          </div>
+          <p className="text-sm text-neutral-400 mt-1">
+            Daily discussion, charts, accountability, and notes. Keep your edge sharp with peers.
+          </p>
+        </div>
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="shrink-0 inline-flex items-center px-4 py-2 rounded-lg bg-[color:var(--accent)] font-semibold hover:opacity-90"
+          style={{ color: "#0B0F16" }}
+        >
+          Join for $20 →
+        </a>
       </div>
     </div>
   );
@@ -266,7 +330,7 @@ function WebinarSchedule({ items }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-sm uppercase tracking-wide text-neutral-400">
-            Webinar Schedule
+            Webinar schedule
           </div>
           <div className="text-lg font-semibold text-neutral-100">What’s coming up</div>
         </div>
