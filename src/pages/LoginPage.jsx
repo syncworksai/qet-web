@@ -3,7 +3,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
-import WhyTeach from "../components/WhyTeach.jsx"; // <-- make sure this file exists
+import WhyTeach from "../components/WhyTeach.jsx"; // <-- ensure this exists
 
 /**
  * Marketing + Login page
@@ -18,8 +18,14 @@ export default function LoginPage() {
 
   const WEBINARS = useMemo(() => [], []);
 
+  // PTB link (unchanged)
   const PTB_URL =
     "https://dashboard.plutustradebase.com/challenges?affiliateId=quantumedge.fx";
+
+  // Booking links
+  const BOOKING_PAGE = "https://calendar.app.google/GBw1pWs4cs1CQSYq5"; // opens their native booking page
+  const BOOKING_EMBED =
+    "https://calendar.google.com/calendar/appointments/schedules/AcZssZ0vefJPjY1lSYg2NjwZwOS81xtRHuv6ttWsM0ivFz8hBMb7PbWrhzYLyYP-qs3jxf3jaFNjvCQK?gv=true"; // iframe embed
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -59,13 +65,14 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen px-4 md:px-6 lg:px-8 py-8">
       <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-7">
-        {/* LEFT */}
-        <section className="space-y-6">
+        {/* LEFT — marketing column */}
+        <section className="space-y-6 order-2 lg:order-1">
           <div className="rounded-2xl p-6 md:p-7 border border-white/10 bg-[color:var(--card,#0A0F16)]">
             <div className="flex items-center gap-3 mb-3">
               <img src={logo} alt="QuantumEdge" className="h-9" />
               <h1 className="text-2xl md:text-3xl font-semibold text-neutral-100">
-                Trade with a system. <span className="text-cyan-300">Improve with data.</span>
+                Trade with a system.{" "}
+                <span className="text-cyan-300">Improve with data.</span>
               </h1>
             </div>
             <p className="text-sm md:text-base text-neutral-400 leading-relaxed">
@@ -99,6 +106,9 @@ export default function LoginPage() {
 
           <WebinarSchedule items={WEBINARS} />
 
+          {/* Booking card (iframe embed + fallback button) */}
+          <BookingCard embedUrl={BOOKING_EMBED} pageUrl={BOOKING_PAGE} />
+
           <a
             href={PTB_URL}
             target="_blank"
@@ -131,12 +141,12 @@ export default function LoginPage() {
 
           <SocialRow />
 
-          {/* Story section */}
+          {/* Keep WhyTeach LAST so on mobile it appears AFTER the sign-in card */}
           <WhyTeach />
         </section>
 
-        {/* RIGHT: Sign In */}
-        <aside className="lg:pl-2">
+        {/* RIGHT — sign-in column */}
+        <aside className="order-1 lg:order-2 lg:pl-2">
           <div className="w-full max-w-md ml-auto rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)]">
             <div className="mb-5">
               <div className="text-sm text-neutral-400">Welcome back</div>
@@ -197,6 +207,48 @@ export default function LoginPage() {
 }
 
 /* ----------------- Sub-components ----------------- */
+
+function BookingCard({ embedUrl, pageUrl }) {
+  return (
+    <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="text-sm uppercase tracking-wide text-neutral-400">
+            Book a Call
+          </div>
+          <div className="text-lg font-semibold text-neutral-100">Schedule with Quantum Edge</div>
+        </div>
+        <a
+          href={pageUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
+          title="Open booking in new tab"
+        >
+          Open in new tab
+        </a>
+      </div>
+
+      {/* Responsive iframe */}
+      <div className="rounded-lg overflow-hidden border border-white/10">
+        <iframe
+          src={embedUrl}
+          title="Quantum Edge Booking"
+          style={{ border: 0 }}
+          width="100%"
+          height="600"
+          frameBorder="0"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
+      </div>
+
+      <div className="mt-2 text-xs text-neutral-500">
+        If the embed doesn’t load, use the button above to open the booking page.
+      </div>
+    </div>
+  );
+}
 
 function ValueCard({ title, children }) {
   return (
