@@ -11,6 +11,7 @@ const FALLBACK = {
   webinars: { price: "$100.00", cadence: "mo" },
   courses:  { price: "$20.00",  cadence: "mo" },
   coaching: { price: "$100.00", cadence: "mo" },
+  community:{ price: "$20.00",  cadence: "mo" }, // NEW fallback
 };
 
 function Badge({ children }) {
@@ -107,8 +108,8 @@ export default function PricingMulti() {
 
   if (loading) return <div className="p-8 text-white">Loading pricing…</div>;
 
-  const priceFor = (k) => (byKey[k]?.price && byKey[k].price !== "—") ? byKey[k].price : FALLBACK[k].price;
-  const cadenceFor = (k) => byKey[k]?.cadence || FALLBACK[k].cadence;
+  const priceFor   = (k) => (byKey[k]?.price && byKey[k].price !== "—") ? byKey[k].price : (FALLBACK[k]?.price || "—");
+  const cadenceFor = (k) => byKey[k]?.cadence || (FALLBACK[k]?.cadence || "mo");
 
   return (
     <div className="min-h-screen flex items-center justify-center p-5">
@@ -159,6 +160,17 @@ export default function PricingMulti() {
             price={priceFor("coaching")}
             cadence={cadenceFor("coaching")}
             features={byKey.coaching?.features || ["1:1 or small group","Personalized feedback","Accountability plan"]}
+            onPrimary={goRegister}
+          />
+        </div>
+
+        {/* NEW ROW: Community Chat card */}
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card
+            title={byKey.community?.name || "Trader Community Chat"}
+            price={priceFor("community")}
+            cadence={cadenceFor("community")}
+            features={byKey.community?.features || ["Private chat & trade rooms","Daily Q&A & peer support","Member-only alerts/discussions"]}
             onPrimary={goRegister}
           />
         </div>
