@@ -3,9 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, LineChart, Line
 } from "recharts";
-import api, { apiPath } from "../api/axios"; // <- default + apiPath
+import api, { apiPath } from "../api/axios";
 import JournalPanel from "../components/JournalPanel";
 import LotSizePanel from "../components/LotSizePanel.jsx";
 
@@ -57,7 +57,6 @@ function toNumberLoose(x) {
 /** Extract a numeric value from the notes by a list of labels */
 function pickFromNotes(notes, labels) {
   const txt = String(notes || "");
-  // 1) direct labels like: PNL: $123.45  |  Net P&L = (12.3)
   for (const lab of labels) {
     const re = new RegExp(`${lab}\\s*[:=]?\\s*([\\$\\(\\)\\-0-9.,]+)`, "i");
     const m = txt.match(re);
@@ -66,7 +65,6 @@ function pickFromNotes(notes, labels) {
       if (v !== null) return v;
     }
   }
-  // 2) CSV Profit/Loss lines e.g. "CSV Profit/Loss raw: ($12.34)"
   const mCsv = txt.match(/CSV\s+Profit\/Loss(?:\s+raw)?\s*[:=]\s*([\$\(\)\-0-9.,]+)/i);
   if (mCsv && mCsv[1] != null) {
     const v = toNumberLoose(mCsv[1]);
@@ -90,8 +88,6 @@ function shiftedWhen(dateStr, timeStr, tzShiftHours) {
 
 /** small wait */
 const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
-
-/** after import, poll until trades are visible (handles eventual consistency) */
 async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
   setLoading(true);
   for (let i = 0; i < tries; i++) {
@@ -274,7 +270,6 @@ export default function TraderLab() {
 
   const fetchTrades = async (id) => {
     try{
-      // use apiPath to lock under /api and keep trailing slash
       const {data} = await api.get(apiPath(`/journal/backtests/trades?run=${id}`));
       return Array.isArray(data) ? data : [];
     }catch(e){
@@ -289,7 +284,6 @@ export default function TraderLab() {
       const rows = await fetchTrades(id);
       setTrades(rows);
     } catch (e) {
-      // If this was a 401, axios has already tried refresh; attempt one more read
       if (e?.response?.status === 401) {
         setTimeout(() => {
           reloadKeyRef.current += 1;
@@ -300,7 +294,6 @@ export default function TraderLab() {
       setLoading(false);
     }
   }
-  // trigger re-read after refresh
   useEffect(() => {
     if (accountId) loadTrades(accountId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -518,9 +511,9 @@ export default function TraderLab() {
       }
     }
     const fromNotes = pickFromNotes(t?.notes, [
-  "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS","RESULT PNL"
+      "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS","RESULT PNL"
     ]);
-if (fromNotes !== null) return fromNotes;
+    if (fromNotes !== null) return fromNotes;
 
     const entry = toNumberLoose(t?.entry_price);
     const exit  = toNumberLoose(t?.exit_price);
@@ -539,11 +532,10 @@ if (fromNotes !== null) return fromNotes;
     const allRows = trades||[];
     const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
 
-    // normalize with shifted date/hour
     const normalized = allRows.map(t => {
       const w = shiftedWhen(t.date, t.trade_time, shift);
-      return { ...t, __when: w }; // may be null if bad date
-    }).filter(t => t.__when); // keep only valid dates
+      return { ...t, __when: w };
+    }).filter(t => t.__when);
 
     const filtered = monthFilter==="all"
       ? normalized
@@ -573,19 +565,23 @@ if (fromNotes !== null) return fromNotes;
     },{net:0,wins:0,losses:0});
     const winRate = withOutcome.length ? (totals.wins/withOutcome.length*100) : 0;
 
-    const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0}));
+    // ---------- Hour buckets: add profitPerHour ----------
+    const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0, profit:0}));
     withOutcome.forEach(t=>{
       const hh = t.__when.hour;
       const b = buckets[hh];
       b.trades += 1;
       if (hh<12) b.am += 1; else b.pm += 1;
       if (t.__is_win===true) b.wins += 1;
+      b.profit += pnlOf(t); // net P&L contributed at this hour
     });
     const hourData = buckets.map(b=> ({
       hour:b.hour,
       winRate: b.trades?(b.wins/b.trades*100):0,
       amTrades: b.am,
       pmTrades: b.pm,
+      profit: b.profit,
+      avgProfit: b.trades ? (b.profit/b.trades) : 0
     }));
 
     const counts = {};
@@ -635,7 +631,6 @@ if (fromNotes !== null) return fromNotes;
     return { filtered: withOutcome, totals, winRate, pie, hourData, avgJournal, topFlags, topMistakes, dowChart, bestDay, avgPerDay, shift };
   }, [trades, monthFilter, pnlMult, tzShift]);
 
-  // Dev diagnostics
   useEffect(() => {
     if (typeof window !== "undefined" && import.meta?.env?.DEV) {
       window.__STORE = {
@@ -807,20 +802,23 @@ if (fromNotes !== null) return fromNotes;
           </div>
         </div>
 
+        {/* Win%, AM/PM Trades AND Profit per Hour */}
         <div className="rounded-xl border p-3 md:col-span-2" style={{borderColor:tokens.grid}}>
-          <div className="text-sm mb-2" style={{color:tokens.muted}}>Win % and AM/PM Trades by Hour</div>
-          <div style={{height:220}}>
+          <div className="text-sm mb-2" style={{color:tokens.muted}}>Win %, AM/PM Trades & P&L by Hour</div>
+          <div style={{height:240}}>
             <ResponsiveContainer>
               <BarChart data={stats.hourData}>
                 <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
                 <XAxis dataKey="hour" tickFormatter={(h)=>String(h).padStart(2,"0")} stroke={tokens.muted}/>
                 <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
-                <YAxis yAxisId="right" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
+                <YAxis yAxisId="rightCount" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
+                <YAxis yAxisId="rightProfit" orientation="right" hide />
                 <Legend wrapperStyle={{ color: tokens.muted }} />
                 <ReTooltip
                   contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
                   formatter={(value, name)=>{
                     if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
+                    if (name === "P&L") return [ money(value), "P&L" ];
                     return [value, name];
                   }}
                   labelFormatter={(h)=> "Hour " + String(h).padStart(2,"0") + ":00" }
@@ -828,8 +826,10 @@ if (fromNotes !== null) return fromNotes;
                 <Bar name="Win %" dataKey="winRate" yAxisId="left">
                   {stats.hourData.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
                 </Bar>
-                <Bar name="AM Trades" dataKey="amTrades" yAxisId="right" fill="#94a3b8" />
-                <Bar name="PM Trades" dataKey="pmTrades" yAxisId="right" fill="#60a5fa" />
+                <Bar name="AM Trades" dataKey="amTrades" yAxisId="rightCount" fill="#94a3b8" />
+                <Bar name="PM Trades" dataKey="pmTrades" yAxisId="rightCount" fill="#60a5fa" />
+                {/* Profit line (net P&L per hour) */}
+                <Line type="monotone" name="P&L" dataKey="profit" yAxisId="rightProfit" dot={false} stroke="#38bdf8" strokeWidth={2}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -969,10 +969,13 @@ if (fromNotes !== null) return fromNotes;
                 const ts = t.__when?.timeShiftedStr || (t.trade_time ? String(t.trade_time).slice(0,5) : "—");
 
                 return (
-                  <tr key={t.id} className="border-b align-top"
-                      style={{borderColor:tokens.grid, background:rgba("#0ea5e9",0.045)}}
-                      onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.085);}}
-                      onMouseLeave={(e)=>{e.currentTarget.style.background=rgba("#0ea5e9",0.045);}}>
+                  <tr
+                    key={t.id}
+                    className="border-b align-top"
+                    style={{borderColor:tokens.grid}}
+                    onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
+                    onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}
+                  >
                     <Td><span className="px-2 py-0.5 text-[11px] rounded-md" style={{background:"#1f2937", color:"#d1d5db"}} title={"Trade id "+t.id}>{rowNo}</span></Td>
                     <Td>{ds ? new Date(ds+"T00:00:00").toLocaleDateString() : "—"}</Td>
                     <Td>{ts}</Td>
@@ -1136,9 +1139,13 @@ function CsvPreview(props){
         </thead>
         <tbody>
           {rows.slice(0,200).map((row,i)=>(
-            <tr key={i} className="border-b" style={{borderColor:tokens.grid, background:rgba("#06b6d4",0.06)}}
-                onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#06b6d4",0.12);}}
-                onMouseLeave={(e)=>{e.currentTarget.style.background=rgba("#06b6d4",0.06);}}>
+            <tr
+              key={i}
+              className="border-b"
+              style={{borderColor:tokens.grid}}
+              onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
+              onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}
+            >
               {headers.map(h=> <td key={h} className="py-2 pr-4 whitespace-nowrap">{String(row[h] ?? "")}</td>)}
             </tr>
           ))}
