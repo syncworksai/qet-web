@@ -4,7 +4,7 @@ import Papa from "papaparse";
 import {
   PieChart, Pie, Cell, Tooltip as ReTooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
-  LineChart, Line, AreaChart, Area, ReferenceLine
+  AreaChart, Area, ReferenceLine, LineChart, Line
 } from "recharts";
 import api, { apiPath } from "../api/axios";
 import JournalPanel from "../components/JournalPanel";
@@ -40,8 +40,7 @@ function winRateColor(rate){
   if (r < 80) return "#facc15";
   return tokens.success;
 }
-
-/** Parse a number from mixed currency/parentheses text like "($12.34)", "1,250.00", "12.3 pips" */
+/** Parse number from mixed text like "($12.34)" or "12.3 pips" */
 function toNumberLoose(x) {
   if (x === null || x === undefined) return null;
   if (typeof x === "number" && Number.isFinite(x)) return x;
@@ -54,8 +53,6 @@ function toNumberLoose(x) {
   if (!Number.isFinite(n)) return null;
   return neg ? -n : n;
 }
-
-/** Extract a numeric value from the notes by a list of labels */
 function pickFromNotes(notes, labels) {
   const txt = String(notes || "");
   for (const lab of labels) {
@@ -66,15 +63,8 @@ function pickFromNotes(notes, labels) {
       if (v !== null) return v;
     }
   }
-  const mCsv = txt.match(/CSV\s+Profit\/Loss(?:\s+raw)?\s*[:=]\s*([\$\(\)\-0-9.,]+)/i);
-  if (mCsv && mCsv[1] != null) {
-    const v = toNumberLoose(mCsv[1]);
-    if (v !== null) return v;
-  }
   return null;
 }
-
-/** Build a shifted Date and derived parts using tzShift (hours). */
 function shiftedWhen(dateStr, timeStr, tzShiftHours) {
   const hhmmss = (timeStr && /^\d{2}:\d{2}(:\d{2})?$/.test(timeStr)) ? (timeStr.length===5?timeStr+":00":timeStr) : "00:00:00";
   const base = new Date(`${dateStr}T${hhmmss}`);
@@ -86,8 +76,6 @@ function shiftedWhen(dateStr, timeStr, tzShiftHours) {
   const dateShiftedStr = `${y}-${String(m+1).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
   return { js: d, year:y, month:m, day:dd, hour, dowMon0, monthKey: `${y}-${String(m+1).padStart(2,"0")}`, dateShiftedStr, timeShiftedStr: `${String(hour).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` };
 }
-
-/** small wait */
 const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
 async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
   setLoading(true);
@@ -104,7 +92,7 @@ async function reloadWithRetries(runId, fetchFn, setLoading, tries = 6) {
   return rows;
 }
 
-/* -------- CSV header flexibility (DEAL is optional/ignored) -------- */
+/* -------- CSV normalizer (DEAL ignored) -------- */
 function normalizeImportedRow(tRaw) {
   const t = { ...(tRaw || {}) };
   const get = (...aliases) => {
@@ -116,44 +104,39 @@ function normalizeImportedRow(tRaw) {
     }
     return null;
   };
-
-  // symbol
   let symbol = get("symbol", "sym", "ticker");
   if (symbol) t.symbol = String(symbol).toUpperCase();
-
-  // direction (BUY/SELL → long/short)
   const type = String(get("direction","type","side") || "").toLowerCase();
   if (type) t.direction = /sell/.test(type) ? "short" : "long";
-
-  // size / prices
   const lots = get("size","qty","quantity","lots","contracts","shares");
   if (lots != null && t.size == null) t.size = toNumberLoose(lots);
-
   const openP = get("entry_price","open price","open_price","price_open");
   if (openP != null && t.entry_price == null) t.entry_price = toNumberLoose(openP);
-
   const closeP = get("exit_price","close price","close_price","price_close");
   if (closeP != null && t.exit_price == null) t.exit_price = toNumberLoose(closeP);
-
   const fee = get("fee","commission","fees");
   if (fee != null && t.fee == null) t.fee = toNumberLoose(fee) || 0;
-
-  // PROFIT → net_pnl
-  const profit = get("net_pnl","pnl","profit","net pl","pl","realized_pnl");
+  const profit = get("net_pnl","pnl","profit","realized_pnl","net pl","pl");
   if (profit != null && t.net_pnl == null) t.net_pnl = toNumberLoose(profit);
 
-  // SL/TP → append to notes (if present). DEAL is explicitly ignored.
+  // Duration (Column K). If present, we keep as temp and write into notes.
+  const duration = get("duration","Duration","duration_min","duration (min)","dur","mins","minutes");
+  if (duration != null && t.duration_min == null) {
+    const d = toNumberLoose(duration);
+    if (d != null) t.duration_min = d;
+  }
+
   const sl = get("stop_loss","stop loss","sl");
   const tp = get("take_profit","take profit","tp");
   const parts = [];
   if (sl != null) parts.push(`SL: ${sl}`);
   if (tp != null) parts.push(`TP: ${tp}`);
+  if (t.duration_min != null) parts.push(`DURATION_MIN=${t.duration_min}`);
   if (parts.length) {
     const pre = t.notes ? String(t.notes).trim() + " | " : "";
     t.notes = pre + parts.join(" | ");
   }
 
-  // date + time from OPEN DATE
   const od = String(get("open date","open_date","date","timestamp") || "");
   if (od) {
     let ymd = "", hms = "00:00:00";
@@ -170,21 +153,12 @@ function normalizeImportedRow(tRaw) {
 }
 
 const TZ_CHOICES = [
-  { label: "UTC−8 (PST)", value: -8 },
-  { label: "UTC−7 (MST)", value: -7 },
-  { label: "UTC−6 (CST)", value: -6 },
-  { label: "UTC−5 (ET Standard)", value: -5 },
-  { label: "UTC−4 (ET Daylight)", value: -4 },
-  { label: "UTC−3", value: -3 },
-  { label: "UTC−2", value: -2 },
-  { label: "UTC−1", value: -1 },
-  { label: "UTC±0", value: 0 },
-  { label: "UTC+1", value: 1 },
-  { label: "UTC+2", value: 2 },
-  { label: "UTC+3", value: 3 },
-  { label: "UTC+4", value: 4 },
-  { label: "UTC+5", value: 5 },
-  { label: "UTC+8", value: 8 },
+  { label: "UTC−8 (PST)", value: -8 },{ label: "UTC−7 (MST)", value: -7 },
+  { label: "UTC−6 (CST)", value: -6 },{ label: "UTC−5 (ET Std)", value: -5 },
+  { label: "UTC−4 (ET Dst)", value: -4 },{ label: "UTC±0", value: 0 },
+  { label: "UTC+1", value: 1 },{ label: "UTC+2", value: 2 },
+  { label: "UTC+3", value: 3 },{ label: "UTC+4", value: 4 },
+  { label: "UTC+5", value: 5 },{ label: "UTC+8", value: 8 },
 ];
 
 /* ---------------- page ---------------- */
@@ -209,18 +183,10 @@ export default function TraderLab() {
   });
 
   const [form, setForm] = useState({
-    date: "",
-    time_h: "9",
-    time_ampm: "AM",
-    symbol: "",
-    direction: "long",
-    size: "",
-    entry_price: "",
-    stop_price: "",
-    target_price: "",
-    fee: "",
-    strategy: "",
-    notes: "",
+    date: "", time_h: "9", time_ampm: "AM",
+    symbol: "", direction: "long",
+    size: "", entry_price: "", stop_price: "", target_price: "", fee: "",
+    strategy: "", notes: "", duration_min: ""
   });
   const attachRef = useRef(null);
   const [attachFile, setAttachFile] = useState(null);
@@ -228,25 +194,17 @@ export default function TraderLab() {
   const [showMgr, setShowMgr] = useState(false);
   const [notice, setNotice] = useState(null);
 
-  // NOTES MODAL (now editable)
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesContent, setNotesContent] = useState("");
   const [notesTitle, setNotesTitle] = useState("");
   const [notesTradeId, setNotesTradeId] = useState(null);
   const [savingNotes, setSavingNotes] = useState(false);
 
-  // retry key for first-call-after-refresh
   const [reloadKey, setReloadKey] = useState(0);
   const reloadKeyRef = useRef(0);
 
-  // Consistency target (frontend-only)
-  const [consistencyTarget, setConsistencyTarget] = useState(20);
-
   const flash = (type, text)=>{ setNotice({type, text}); setTimeout(()=>setNotice(null), 2400); };
-
-  function updateForm(patch){
-    setForm(f=>({ ...f, ...patch }));
-  }
+  const updateForm = (patch)=> setForm(f=>({ ...f, ...patch }));
 
   useEffect(()=>{ loadAccounts(); }, []);
   async function loadAccounts(prefer=""){
@@ -271,17 +229,12 @@ export default function TraderLab() {
       }
     }catch(e){ console.error("loadAccounts",e); }
   }
-
   const fetchTrades = async (id) => {
     try{
       const {data} = await api.get(apiPath(`/journal/backtests/trades?run=${id}`));
       return Array.isArray(data) ? data : [];
-    }catch(e){
-      console.error("fetchTrades", e);
-      return [];
-    }
+    }catch(e){ console.error("fetchTrades", e); return []; }
   };
-
   async function loadTrades(id){
     setLoading(true);
     try{
@@ -289,45 +242,29 @@ export default function TraderLab() {
       setTrades(rows);
     } catch (e) {
       if (e?.response?.status === 401) {
-        setTimeout(() => {
-          reloadKeyRef.current += 1;
-          setReloadKey(reloadKeyRef.current);
-        }, 0);
+        setTimeout(() => { reloadKeyRef.current += 1; setReloadKey(reloadKeyRef.current); }, 0);
       }
-    } finally{
-      setLoading(false);
-    }
+    } finally{ setLoading(false); }
   }
-  useEffect(() => {
-    if (accountId) loadTrades(accountId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reloadKey]);
+  useEffect(() => { if (accountId) loadTrades(accountId); /* eslint-disable-next-line */ }, [reloadKey]);
 
   async function createAccount(){
     const name = window.prompt("Account name?");
     if(!name) return;
     try{
       const {data} = await api.post(apiPath("/journal/backtests/runs"), { name });
-      await loadAccounts(String(data.id));
-      flash("ok","Account created");
+      await loadAccounts(String(data.id)); flash("ok","Account created");
     }catch{ window.alert("Failed to create account."); }
   }
   async function renameAccount(id){
-    const name = window.prompt("Rename account:");
-    if(!name) return;
-    try{
-      await api.patch(apiPath(`/journal/backtests/runs/${id}`), { name });
-      await loadAccounts(String(id));
-      flash("ok","Renamed");
-    }catch{ window.alert("Rename failed"); }
+    const name = window.prompt("Rename account:"); if(!name) return;
+    try{ await api.patch(apiPath(`/journal/backtests/runs/${id}`), { name }); await loadAccounts(String(id)); flash("ok","Renamed"); }
+    catch{ window.alert("Rename failed"); }
   }
   async function deleteAccount(id){
     if(!window.confirm("Delete this account and ALL its trades?")) return;
-    try{
-      await api.delete(apiPath(`/journal/backtests/runs/${id}`));
-      await loadAccounts("");
-      flash("ok","Account deleted");
-    }catch{ window.alert("Delete failed"); }
+    try{ await api.delete(apiPath(`/journal/backtests/runs/${id}`)); await loadAccounts(""); flash("ok","Account deleted"); }
+    catch{ window.alert("Delete failed"); }
   }
 
   function onCsvSelected(file){
@@ -352,11 +289,11 @@ export default function TraderLab() {
       fd.append("file", csvFile);
       fd.append("run_id", String(accountId));
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
-      const { data } = await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
+      await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
       const rows = await reloadWithRetries(accountId, fetchTrades, setLoading, 6);
       setTrades(rows);
       setCsvFile(null); setCsvPreviewRows(null);
-      flash("ok", `CSV imported (${data?.imported ?? rows.length}/${data?.rows_parsed ?? "?"})`);
+      flash("ok", `CSV imported`);
     }catch(e){
       const msg = (e?.response?.data?.detail) ||
                   (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
@@ -364,7 +301,6 @@ export default function TraderLab() {
       window.alert(msg);
     } finally { setImporting(false); }
   }
-
   async function createAccountAndImport(){
     if(!csvFile) return;
     const name = window.prompt("New account name (from CSV):", csvFile.name.replace(/\.[^/.]+$/, "")); if(!name) return;
@@ -377,13 +313,12 @@ export default function TraderLab() {
       fd.append("file", csvFile);
       fd.append("run_id", newId);
       fd.append("tz_shift_hours", String(Number.isFinite(tzShift) ? tzShift : 0));
-      const resp = await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
+      await api.post(apiPath("/journal/backtests/import_csv"), fd, { headers: { "Content-Type":"multipart/form-data" }});
       const rows = await reloadWithRetries(newId, fetchTrades, setLoading, 6);
       setTrades(rows);
       await loadAccounts(newId);
-      const d = resp?.data||{};
-      flash("ok", `Account created & CSV imported (${d.imported ?? rows.length}/${d.rows_parsed ?? "?"})`);
       setCsvFile(null); setCsvPreviewRows(null);
+      flash("ok", `Account created & CSV imported`);
     }catch(e){
       const msg = (e?.response?.data?.detail) ||
                   (e?.response?.data?.errors?.join && e.response.data.errors.join("\n")) ||
@@ -403,6 +338,7 @@ export default function TraderLab() {
       if (form.stop_price) parts.push("SL: "+form.stop_price);
       if (form.target_price) parts.push("TP: "+form.target_price);
       if (form.strategy) parts.push("STRATEGY: "+form.strategy);
+      if (form.duration_min) parts.push("DURATION_MIN="+form.duration_min);
       parts.push("MODE: LIVE");
       const meta = parts.join(" | ");
       const notes = (meta ? meta+" | " : "") + (form.notes||"");
@@ -436,11 +372,7 @@ export default function TraderLab() {
         });
       }
       await loadTrades(accountId);
-      setForm({
-        date:"", time_h:"9", time_ampm:"AM", symbol:"", direction:"long",
-        size:"", entry_price:"", stop_price:"", target_price:"", fee:"",
-        strategy:"", notes:""
-      });
+      setForm({ date:"", time_h:"9", time_ampm:"AM", symbol:"", direction:"long", size:"", entry_price:"", stop_price:"", target_price:"", fee:"", strategy:"", notes:"", duration_min:"" });
       setAttachFile(null); if(attachRef.current) attachRef.current.value="";
       flash("ok","Trade saved");
     }catch(err){ console.error(err); window.alert("Failed to add trade."); }
@@ -459,8 +391,6 @@ export default function TraderLab() {
     try{ await api.post(apiPath(`/journal/backtests/trades/${tradeId}/remove-attachment`)); await loadTrades(accountId); }
     catch{ window.alert("Remove failed"); }
   }
-
-  // editable notes modal
   function openNotesEditor(t){
     setNotesTradeId(t.id);
     const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
@@ -479,15 +409,11 @@ export default function TraderLab() {
       setNotesOpen(false);
       await loadTrades(accountId);
       flash("ok","Notes updated");
-    }catch(e){
-      console.error(e);
-      window.alert("Failed to save notes.");
-    }finally{
-      setSavingNotes(false);
-    }
+    }catch(e){ console.error(e); window.alert("Failed to save notes."); }
+    finally{ setSavingNotes(false); }
   }
 
-  // Build month options from **shifted** dates
+  // Month options (shifted)
   const monthOptions = useMemo(()=>{
     const shift = Number(localStorage.getItem(LAST_TZ_KEY) || tzShift || 0);
     const set = new Set();
@@ -503,20 +429,16 @@ export default function TraderLab() {
   useEffect(()=>{ if(accountId){ try { localStorage.setItem(pnlMultKey(accountId), String(pnlMult)); } catch {} } }, [pnlMult, accountId]);
   useEffect(()=>{ if(accountId){ try { localStorage.setItem(acctSizeKey(accountId), String(acctSize)); } catch {} } }, [acctSize, accountId]);
 
-  /** ---------- Robust P&L extraction ---------- */
+  /** ---------- P&L helpers ---------- */
   function pnlOfRaw(t) {
-    const fieldCandidates = [
-      "net_pnl","pnl","profit","realized_pnl","realized","gain","p_l","net_pl","netProfit","NetPL","PL"
-    ];
+    const fieldCandidates = ["net_pnl","pnl","profit","realized_pnl","realized","gain","p_l","net_pl","netProfit","NetPL","PL"];
     for (const key of fieldCandidates) {
       if (t[key] != null) {
         const v = toNumberLoose(t[key]);
         if (v !== null) return v;
       }
     }
-    const fromNotes = pickFromNotes(t?.notes, [
-      "PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS","RESULT PNL"
-    ]);
+    const fromNotes = pickFromNotes(t?.notes, ["PNL","P&L","NET PNL","NET P&L","NET PROFIT","PROFIT","LOSS"]);
     if (fromNotes !== null) return fromNotes;
 
     const entry = toNumberLoose(t?.entry_price);
@@ -568,9 +490,8 @@ export default function TraderLab() {
       else if (t.__is_win===false) a.losses++;
       return a;
     },{net:0,wins:0,losses:0});
-    const winRate = withOutcome.length ? (totals.wins/withOutcome.length*100) : 0;
 
-    // ---------- Hour buckets: add profitPerHour & avgProfit ----------
+    // Buckets by HOUR
     const buckets = Array.from({length:24},(_,h)=> ({hour:h,trades:0,wins:0,am:0,pm:0, profit:0}));
     withOutcome.forEach(t=>{
       const hh = t.__when.hour;
@@ -589,7 +510,7 @@ export default function TraderLab() {
       avgProfit: b.trades ? (b.profit/b.trades) : 0
     }));
 
-    // ---------- Per-day aggregation for tables & equity curve ----------
+    // Per-day aggregation
     const byDay = {};
     withOutcome.forEach(t=>{
       const key = t.__when.dateShiftedStr;
@@ -598,25 +519,14 @@ export default function TraderLab() {
       byDay[key].trades += 1;
     });
     const dayRows = Object.values(byDay).sort((a,b)=> a.date.localeCompare(b.date));
+
+    // Equity curve + Max DD
     let cumulative = Number(acctSize)||0;
-    const equityCurve = dayRows.map(d=>{
-      cumulative += d.pnl;
-      return { date:d.date, balance: cumulative, pnl: d.pnl };
-    });
+    const equityCurve = dayRows.map(d=>{ cumulative += d.pnl; return { date:d.date, balance:cumulative, pnl:d.pnl }; });
+    let peak = Number(acctSize)||0, maxDD=0;
+    equityCurve.forEach(p=>{ peak = Math.max(peak, p.balance); maxDD = Math.max(maxDD, peak - p.balance); });
 
-    // Max drawdown (peak-to-valley on balance series)
-    let peak = Number(acctSize)||0;
-    let maxDD = 0;
-    equityCurve.forEach(p=>{
-      if (p.balance > peak) peak = p.balance;
-      const dd = peak - p.balance;
-      if (dd > maxDD) maxDD = dd;
-    });
-
-    const counts = {};
-    withOutcome.forEach(t=>{ const s=(t.symbol||"—").toUpperCase(); counts[s]=(counts[s]||0)+1; });
-    const pie = Object.keys(counts).map(k=> ({name:k, value:counts[k]})).sort((a,b)=>b.value-a.value).slice(0,12);
-
+    // Day of week summaries
     const dow = Array.from({length:7},()=>({trades:0,wins:0,pnl:0}));
     const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     withOutcome.forEach(t=>{
@@ -636,74 +546,58 @@ export default function TraderLab() {
     const avgPerDay = uniqueDays ? (totals.net / uniqueDays) : 0;
     const avgTradesPerDay = uniqueDays ? ((withOutcome.length) / uniqueDays) : 0;
 
-    // Best/Worst day
+    // Best/Worst day (by pnl)
     let bestDayPnl = null, worstDayPnl = null;
     dayRows.forEach(d=>{
       if (bestDayPnl===null || d.pnl > bestDayPnl.pnl) bestDayPnl = d;
       if (worstDayPnl===null || d.pnl < worstDayPnl.pnl) worstDayPnl = d;
     });
 
-    // Journal extras
-    let sumScore = 0, countScore = 0;
-    const flagCounts = {}, mistakeCounts = {};
-    withOutcome.forEach(t=>{
-      const notes = String(t.notes || "");
-      const mV2Score = notes.match(/JRNL_V2:[\s\S]*?SCORE\s*=\s*(\d+)/i);
-      if (mV2Score) { sumScore += Number(mV2Score[1]||0); countScore++; }
-      const mV2Mistakes = notes.match(/MISTAKES\s*=\s*([^\s;|]+)/i);
-      if (mV2Mistakes) {
-        mV2Mistakes[1].split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
-          .forEach(tag=>{ if(tag!=="none") mistakeCounts[tag] = (mistakeCounts[tag]||0)+1; });
-      }
-      const mFlags = notes.match(/JRNL_FLAGS:\s*([^\|]+)/i);
-      if (mFlags) {
-        mFlags[1].split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
-          .forEach(f=>{ if(f!=="none") flagCounts[f] = (flagCounts[f]||0) + 1; });
-      }
-    });
-    const avgJournal = countScore ? Math.round(sumScore / countScore) : 0;
+    // ---------- PAYOUT RULES ----------
+    const acct = Number(acctSize)||0;
+    const minDayDollar = acct * 0.005;  // 0.5% of account
+    const needMinDays = 7;
+    const needProfitPct = 0.07;         // 7% target
+    const consistencyCap = 0.15;        // 15% rule
 
-    // Consistency (days green / total days)
-    const profitableDays = dayRows.filter(d=> d.pnl > 0).length;
-    const losingDays = dayRows.filter(d=> d.pnl < 0).length;
-    const consistency = uniqueDays ? (profitableDays / uniqueDays * 100) : 0;
+    // A) Minimum profitable days ≥ 0.5% each
+    const qualifyingDays = dayRows.filter(d => d.pnl >= minDayDollar);
+    const minDaysMet = qualifyingDays.length >= needMinDays;
 
-    // Tables for tabs
-    const profitableDaysList = [...dayRows].filter(d=>d.pnl>0).sort((a,b)=>b.pnl-a.pnl).slice(0,20);
-    const losingDaysList = [...dayRows].filter(d=>d.pnl<0).sort((a,b)=>a.pnl-b.pnl).slice(0,20);
+    // B) Profit target (net vs account)
+    const profitTargetDollar = acct * needProfitPct;
+    const profitTargetMet = totals.net >= profitTargetDollar;
+
+    // C) 15% Consistency: Highest positive day <= 15% of total positive profit
+    const posOnly = dayRows.filter(d => d.pnl > 0);
+    const totalPositiveProfit = posOnly.reduce((s,d)=>s+d.pnl,0);
+    const highestProfitDay = posOnly.length ? Math.max(...posOnly.map(d=>d.pnl)) : 0;
+    const minTotalForConsistency = highestProfitDay / consistencyCap; // required positive profit total
+    const consistencyMet = totalPositiveProfit >= minTotalForConsistency || highestProfitDay===0;
+
+    // Suggest missing amounts
+    const needMoreForConsistency = Math.max(0, minTotalForConsistency - totalPositiveProfit);
+    const needMoreForTarget = Math.max(0, profitTargetDollar - totals.net);
+    const needMoreMinDays = Math.max(0, needMinDays - qualifyingDays.length);
 
     return {
       filtered: withOutcome,
-      totals, winRate, pie, hourData,
-      avgJournal, dowChart, bestDay, avgPerDay, avgTradesPerDay,
-      dayRows, equityCurve, maxDD,
-      bestDayPnl, worstDayPnl,
-      profitableDays, losingDays, consistency,
-      profitableDaysList, losingDaysList,
-      shift
+      totals, hourData, dowChart, bestDay, avgPerDay, avgTradesPerDay,
+      dayRows, equityCurve, maxDD, bestDayPnl, worstDayPnl,
+      // payout
+      payout: {
+        minDayDollar,
+        qualifyingDaysCount: qualifyingDays.length,
+        needMinDays, minDaysMet,
+        profitTargetDollar, profitTargetMet,
+        consistencyCap, highestProfitDay, totalPositiveProfit,
+        minTotalForConsistency, consistencyMet,
+        needMoreForConsistency, needMoreForTarget, needMoreMinDays,
+      }
     };
   }, [trades, monthFilter, pnlMult, tzShift, acctSize]);
 
-  // Consistency target helper (frontend only)
-  const consistencyAdvice = useMemo(()=>{
-    const totalDays = stats.dayRows?.length || 0;
-    const posDays = stats.profitableDays || 0;
-    const target = Math.max(0, Math.min(100, Number(consistencyTarget)||0));
-    const needPos = Math.ceil((target/100) * totalDays);
-    const delta = Math.max(0, needPos - posDays);
-    return { totalDays, posDays, target, needPos, delta };
-  }, [stats.dayRows, stats.profitableDays, consistencyTarget]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined" && import.meta?.env?.DEV) {
-      window.__STORE = {
-        tradesGet: () => trades,
-        state: { trades, accounts, accountId },
-      };
-    }
-  }, [trades, accounts, accountId]);
-
-  /* ---------- UI ---------- */
+  // ---------- UI ----------
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* Equity curve hero */}
@@ -739,68 +633,39 @@ export default function TraderLab() {
         </div>
       </div>
 
+      {/* Header + controls */}
       <header className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold">TraderLab (Live)</h1>
           <div className="text-xs" style={{color:tokens.muted}}>
-            trades: {stats.filtered ? stats.filtered.length : 0} • wins: {stats.totals.wins} • losses: {stats.totals.losses} • win rate: {stats.winRate.toFixed(1)}%
+            trades: {stats.filtered ? stats.filtered.length : 0} • win rate: {((stats.filtered?.length? (stats.filtered.filter(t=>t.__is_win===true).length / stats.filtered.length *100):0)).toFixed(1)}%
           </div>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} onClick={createAccount}>New Account</button>
 
-          <select
-            className="qe-select text-sm"
-            value={accountId}
+          <select className="qe-select text-sm" value={accountId}
             onChange={async (e)=>{ const id=e.target.value; setAccountId(id); try{localStorage.setItem(LAST_ACCOUNT_KEY,id);}catch{} if(id) await loadTrades(id); else setTrades([]); }}
-            title="Select account"
-            style={{minWidth: 260}}
-          >
+            title="Select account" style={{minWidth: 260}}>
             {(accounts||[]).map(a=> <option key={a.id} value={a.id}>{a.name || ("Acc "+a.id)}</option>)}
             {(!accounts||accounts.length===0) && <option value="">No accounts</option>}
           </select>
 
-          <select
-            className="qe-select text-sm"
-            value={monthFilter}
-            onChange={(e)=>setMonthFilter(e.target.value)}
-            title="Filter by month (shifted)"
-          >
+          <select className="qe-select text-sm" value={monthFilter} onChange={(e)=>setMonthFilter(e.target.value)} title="Filter by month (shifted)">
             {monthOptions.map(opt=> <option key={opt} value={opt}>{opt==="all" ? "All months" : opt}</option>)}
           </select>
 
-          <select
-            className="qe-select text-sm"
-            value={tzShift}
-            onChange={(e)=>setTzShift(Number(e.target.value))}
-            title="Apply hour shift to bucketing/preview and when importing"
-          >
+          <select className="qe-select text-sm" value={tzShift} onChange={(e)=>setTzShift(Number(e.target.value))} title="Apply hour shift">
             {TZ_CHOICES.map(z=> <option key={String(z.value)} value={z.value}>{z.label}</option>)}
           </select>
 
           <div className="flex items-center gap-2">
             <label className="text-xs" style={{color:tokens.muted}}>P&L ×</label>
-            <input
-              className="qe-field"
-              style={{ width: 70 }}
-              type="number"
-              step="1"
-              value={pnlMult}
-              onChange={(e)=> setPnlMult(Number(e.target.value||1))}
-              title="Multiply all computed P&L by this factor (set 100 if your CSV is in cents/pips)"
-            />
+            <input className="qe-field" style={{ width: 70 }} type="number" step="1" value={pnlMult} onChange={(e)=> setPnlMult(Number(e.target.value||1))}/>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-xs" style={{color:tokens.muted}}>Account size</label>
-            <input
-              className="qe-field"
-              style={{ width: 110 }}
-              type="number"
-              step="0.01"
-              value={acctSize}
-              onChange={(e)=> setAcctSize(Number(e.target.value||0))}
-              title="Starting account balance for this run"
-            />
+            <input className="qe-field" style={{ width: 110 }} type="number" step="0.01" value={acctSize} onChange={(e)=> setAcctSize(Number(e.target.value||0))}/>
           </div>
 
           <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={()=>setShowMgr(true)}>Manage</button>
@@ -813,12 +678,10 @@ export default function TraderLab() {
       </header>
 
       {notice && (
-        <div
-          className="rounded-lg px-3 py-2 text-sm"
+        <div className="rounded-lg px-3 py-2 text-sm"
           style={ notice.type==="ok"
             ? {background:"rgba(16,185,129,.12)", color:"#10b981", border:"1px solid rgba(16,185,129,.3)"}
-            : {background:"rgba(239,68,68,.12)", color:"#ef4444", border:"1px solid rgba(239,68,68,.3)"} }
-        >
+            : {background:"rgba(239,68,68,.12)", color:"#ef4444", border:"1px solid rgba(239,68,68,.3)"} }>
           {notice.text}
         </div>
       )}
@@ -828,12 +691,7 @@ export default function TraderLab() {
           <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
             <div className="font-medium">CSV Preview (first {Math.min(200,csvPreviewRows.length)} rows)</div>
             <div className="flex items-center gap-2">
-              <select
-                className="qe-select text-sm"
-                value={tzShift}
-                onChange={(e)=>setTzShift(Number(e.target.value))}
-                title="Apply this hour shift while importing"
-              >
+              <select className="qe-select text-sm" value={tzShift} onChange={(e)=>setTzShift(Number(e.target.value))} title="Apply hour shift while importing">
                 {TZ_CHOICES.map(z=> <option key={String(z.value)} value={z.value}>{z.label}</option>)}
               </select>
               <button className="px-3 py-2 rounded-lg text-white text-sm" style={{background:tokens.primary}} disabled={importing} onClick={importCsvIntoCurrent}>{importing?"Importing…":"Import to Account"}</button>
@@ -843,7 +701,7 @@ export default function TraderLab() {
           </div>
           <CsvPreview rows={csvPreviewRows}/>
           <div className="text-xs mt-2" style={{color:tokens.muted}}>
-            Expected columns are flexible. <strong>DEAL is optional and ignored.</strong> SL/TP are appended to notes automatically.
+            Columns are flexible. <strong>DEAL ignored.</strong> SL/TP and Duration are added to notes automatically.
           </div>
         </div>
       )}
@@ -851,100 +709,53 @@ export default function TraderLab() {
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-8 gap-3">
         <KPI label="# Trades" value={stats.filtered ? stats.filtered.length : 0}/>
-        <KPI label="Wins" value={stats.totals.wins}/>
-        <KPI label="Losses" value={stats.totals.losses}/>
+        <KPI label="Wins" value={stats.filtered?.filter(t=>t.__is_win===true).length || 0}/>
+        <KPI label="Losses" value={stats.filtered?.filter(t=>t.__is_win===false).length || 0}/>
         <KPI label="Net P&L" value={money(stats.totals.net)}/>
-        <KPI label="Avg Journal Score" value={stats.avgJournal || 0}/>
         <KPI label="Account Size" value={money(acctSize)}/>
         <KPI label="Balance" value={money(acctSize + stats.totals.net)}/>
+        <KPI label="Avg P&L / Day" value={money(stats.avgPerDay)}/>
         <KPI label="Max Drawdown" value={money(stats.maxDD)}/>
       </div>
 
-      {/* Extended KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-        <KPI label="Avg Profit / Hour (overall)" value={money((stats.hourData||[]).reduce((s,h)=>s+h.avgProfit,0) / ((stats.hourData||[]).filter(h=>h.trades>0).length || 1))}/>
-        <KPI label="Avg Trades / Day" value={(stats.avgTradesPerDay||0).toFixed(2)}/>
-        <KPI label="Avg P&L / Day" value={money(stats.avgPerDay)}/>
-        <KPI label="Profitable Days" value={stats.profitableDays || 0}/>
-        <KPI label="Losing Days" value={stats.losingDays || 0}/>
-        <KPI label="Highest Profitable Day" value={stats.bestDayPnl ? `${new Date(stats.bestDayPnl.date+"T00:00:00").toLocaleDateString()} • ${money(stats.bestDayPnl.pnl)}` : "—"}/>
-      </div>
+      {/* Payout Consistency Card */}
+      <PayoutCard payout={stats.payout} />
 
-      {/* Consistency Score block */}
-      <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-sm" style={{color:tokens.muted}}>
-            Consistency Score (profitable days ÷ total days): <span className="font-semibold" style={{color:"#e5edf7"}}>{(stats.consistency||0).toFixed(1)}%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs" style={{color:tokens.muted}}>Target %</label>
-            <input className="qe-field" type="number" min={0} max={100} step="1" value={consistencyTarget} onChange={(e)=>setConsistencyTarget(e.target.value)} style={{width:80}}/>
-          </div>
-        </div>
-        <div className="text-xs mt-2" style={{color:tokens.muted}}>
-          Trading days this period: <span style={{color:"#e5edf7"}}>{consistencyAdvice.totalDays}</span> • Profitable: <span style={{color:"#e5edf7"}}>{consistencyAdvice.posDays}</span> •
-          Needed for {consistencyAdvice.target}%: <span style={{color:"#e5edf7"}}>{consistencyAdvice.needPos}</span> •
-          {consistencyAdvice.delta === 0 ? (
-            <span style={{color:tokens.success}}> Goal met ✅</span>
-          ) : (
-            <span> You need <span style={{color:"#e5edf7"}}>{consistencyAdvice.delta}</span> additional profitable day(s) to hit the target.</span>
-          )}
-        </div>
-      </div>
-
-      {/* charts row */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
-          <div className="text-sm mb-2" style={{color:tokens.muted}}>Top Symbols (by trades)</div>
-          <div style={{height:220}}>
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={stats.pie} dataKey="value" nameKey="name" innerRadius={48} outerRadius={95} paddingAngle={2}>
-                  {stats.pie.map((_,i)=><Cell key={i} stroke="#0b1220" strokeWidth={1} fill={tokens.charts[i%tokens.charts.length]} />)}
-                </Pie>
-                <ReTooltip contentStyle={{ borderRadius:12, background:"#0b1220", border:"1px solid "+tokens.grid, color:"#e5edf7" }}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          {/* Mistakes & Flags summary stays as-is */}
-        </div>
-
-        {/* Win%, AM/PM Trades AND Profit per Hour (incl. avgProfit line) */}
-        <div className="rounded-xl border p-3 md:col-span-2" style={{borderColor:tokens.grid}}>
-          <div className="text-sm mb-2" style={{color:tokens.muted}}>Win %, AM/PM Trades, P&L & Avg/Trade by Hour</div>
-          <div style={{height:260}}>
-            <ResponsiveContainer>
-              <BarChart data={stats.hourData}>
-                <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
-                <XAxis dataKey="hour" tickFormatter={(h)=>String(h).padStart(2,"0")} stroke={tokens.muted}/>
-                <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
-                <YAxis yAxisId="rightCount" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
-                <YAxis yAxisId="rightProfit" orientation="right" hide />
-                <Legend wrapperStyle={{ color: tokens.muted }} />
-                <ReTooltip
-                  contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
-                  formatter={(value, name)=>{
-                    if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
-                    if (name === "P&L") return [ money(value), "P&L" ];
-                    if (name === "Avg/Trade") return [ money(value), "Avg/Trade" ];
-                    return [value, name];
-                  }}
-                  labelFormatter={(h)=> "Hour " + String(h).padStart(2,"0") + ":00" }
-                />
-                <Bar name="Win %" dataKey="winRate" yAxisId="left">
-                  {stats.hourData.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
-                </Bar>
-                <Bar name="AM Trades" dataKey="amTrades" yAxisId="rightCount" fill="#94a3b8" />
-                <Bar name="PM Trades" dataKey="pmTrades" yAxisId="rightCount" fill="#60a5fa" />
-                <Line type="monotone" name="P&L" dataKey="profit" yAxisId="rightProfit" dot={false} stroke="#38bdf8" strokeWidth={2}/>
-                <Line type="monotone" name="Avg/Trade" dataKey="avgProfit" yAxisId="rightProfit" dot={false} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={2}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      {/* Hourly chart */}
+      <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
+        <div className="text-sm mb-2" style={{color:tokens.muted}}>Win %, AM/PM Trades, P&L & Avg/Trade by Hour</div>
+        <div style={{height:260}}>
+          <ResponsiveContainer>
+            <BarChart data={stats.hourData}>
+              <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" />
+              <XAxis dataKey="hour" tickFormatter={(h)=>String(h).padStart(2,"0")} stroke={tokens.muted}/>
+              <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
+              <YAxis yAxisId="rightCount" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
+              <YAxis yAxisId="rightProfit" orientation="right" hide />
+              <Legend wrapperStyle={{ color: tokens.muted }} />
+              <ReTooltip
+                contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
+                formatter={(value, name)=>{
+                  if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
+                  if (name === "P&L") return [ money(value), "P&L" ];
+                  if (name === "Avg/Trade") return [ money(value), "Avg/Trade" ];
+                  return [value, name];
+                }}
+                labelFormatter={(h)=> "Hour " + String(h).padStart(2,"0") + ":00" }
+              />
+              <Bar name="Win %" dataKey="winRate" yAxisId="left">
+                {stats.hourData.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
+              </Bar>
+              <Bar name="AM Trades" dataKey="amTrades" yAxisId="rightCount" fill="#94a3b8" />
+              <Bar name="PM Trades" dataKey="pmTrades" yAxisId="rightCount" fill="#60a5fa" />
+              <Line type="monotone" name="P&L" dataKey="profit" yAxisId="rightProfit" dot={false} stroke="#38bdf8" strokeWidth={2}/>
+              <Line type="monotone" name="Avg/Trade" dataKey="avgProfit" yAxisId="rightProfit" dot={false} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={2}/>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Best Day + P&L by Day of Week */}
+      {/* Day-of-week + summaries */}
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-xl border p-3 md:col-span-2" style={{borderColor:tokens.grid}}>
           <div className="text-sm mb-2" style={{color:tokens.muted}}>Best Day to Trade (Win% & Trades)</div>
@@ -956,14 +767,7 @@ export default function TraderLab() {
                 <YAxis yAxisId="left" domain={[0,100]} tickFormatter={(v)=>v+"%"} stroke={tokens.muted}/>
                 <YAxis yAxisId="right" orientation="right" allowDecimals={false} stroke={tokens.muted}/>
                 <Legend wrapperStyle={{ color: tokens.muted }} />
-                <ReTooltip
-                  contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}
-                  formatter={(value, name)=>{
-                    if (name === "Win %") return [ (value && value.toFixed ? value.toFixed(0) : value) + "%", "Win %" ];
-                    if (name === "Trades") return [value, "Trades"];
-                    return [value, name];
-                  }}
-                />
+                <ReTooltip contentStyle={{ borderRadius: 12, background: "#0b1220", border: "1px solid "+tokens.grid, color: "#e5edf7" }}/>
                 <Bar name="Win %" dataKey="winRate" yAxisId="left">
                   {stats.dowChart.map((d,i)=> <Cell key={i} fill={winRateColor(d.winRate)} />)}
                 </Bar>
@@ -973,7 +777,6 @@ export default function TraderLab() {
           </div>
         </div>
 
-        {/* P&L by Day summary + Worst day */}
         <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
           <div className="text-sm mb-2 flex items-center justify-between" style={{color:tokens.muted}}>
             <span>P&L by Day of Week</span>
@@ -988,27 +791,15 @@ export default function TraderLab() {
             ))}
           </div>
           <div className="mt-3 text-xs" style={{color:tokens.muted}}>
+            Best Day: <span style={{color:"#e5edf7"}}>{stats.bestDayPnl ? `${new Date(stats.bestDayPnl.date+"T00:00:00").toLocaleDateString()} • ${money(stats.bestDayPnl.pnl)}` : "—"}</span><br/>
             Worst Day: <span style={{color:"#e5edf7"}}>{stats.worstDayPnl ? `${new Date(stats.worstDayPnl.date+"T00:00:00").toLocaleDateString()} • ${money(stats.worstDayPnl.pnl)}` : "—"}</span>
           </div>
         </div>
       </div>
 
-      {/* Profitable vs Losing days tabs */}
-      <div className="rounded-2xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-sm font-medium">Trading Days</span>
-          <span className="text-xs px-2 py-0.5 rounded-full" style={{background:"rgba(255,255,255,0.06)", color:tokens.muted}}>
-            {stats.dayRows?.length || 0} days
-          </span>
-        </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          <DayTable title="Top Profitable Days" rows={stats.profitableDaysList} />
-          <DayTable title="Top Losing Days" rows={stats.losingDaysList} losing />
-        </div>
-      </div>
-
       <LotSizePanel runId={accountId} trades={stats.filtered} pnlOf={pnlOf} />
 
+      {/* Journal + Add Trade */}
       <div className="grid md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
           <JournalPanel compact runId={accountId} />
@@ -1020,11 +811,11 @@ export default function TraderLab() {
             <Input label="Date" type="date" value={form.date} onChange={(v)=>updateForm({date:v})}/>
             <div className="grid grid-cols-3 gap-3">
               <Select label="Hour" value={form.time_h} onChange={(v)=>updateForm({time_h:v})}
-                      options={Array.from({length:12},(_,i)=>({label:String(i+1), value:String(i+1)}))}/>
+                options={Array.from({length:12},(_,i)=>({label:String(i+1), value:String(i+1)}))}/>
               <Select label="AM/PM" value={form.time_ampm} onChange={(v)=>updateForm({time_ampm:v})}
-                      options={[{label:"AM",value:"AM"},{label:"PM",value:"PM"}]}/>
+                options={[{label:"AM",value:"AM"},{label:"PM",value:"PM"}]}/>
               <Select label="Side" value={form.direction} onChange={(v)=>updateForm({direction:v})}
-                      options={[{label:"Long",value:"long"},{label:"Short",value:"short"}]}/>
+                options={[{label:"Long",value:"long"},{label:"Short",value:"short"}]}/>
             </div>
 
             <Input label="Symbol" value={form.symbol} onChange={(v)=>updateForm({symbol:v})} placeholder="XAUUSD / EURUSD / AAPL"/>
@@ -1039,6 +830,8 @@ export default function TraderLab() {
               <Input label="Target (TP)" value={form.target_price} onChange={(v)=>updateForm({target_price:v})}/>
               <Input label="Strategy" value={form.strategy} onChange={(v)=>updateForm({strategy:v})} placeholder="Breakout A"/>
             </div>
+
+            <Input label="Duration (min)" value={form.duration_min} onChange={(v)=>updateForm({duration_min:v})} />
 
             <div>
               <label className="text-xs" style={{color:tokens.muted}}>Notes</label>
@@ -1055,7 +848,7 @@ export default function TraderLab() {
         </div>
       </div>
 
-      {/* Trades Table */}
+      {/* Trades table */}
       <div className="rounded-xl border p-3 md:p-4" style={{borderColor:tokens.grid}}>
         <div className="font-medium mb-2">Trades {accountId && "(Account "+accountId+")"}</div>
         <div className="overflow-auto">
@@ -1070,8 +863,7 @@ export default function TraderLab() {
                 <Th style={{width:90}}>Size</Th>
                 <Th style={{width:90}}>Fee</Th>
                 <Th style={{width:110}}>P&L</Th>
-                <Th style={{width:90}}>Journal</Th>
-                <Th style={{width:150}}>Mistakes</Th>
+                <Th style={{width:110}}>Duration</Th>
                 <Th style={{width:130}}>Strategy</Th>
                 <Th style={{width:140}}>Notes</Th>
                 <Th style={{width:110}}>Attachment</Th>
@@ -1082,27 +874,17 @@ export default function TraderLab() {
               {(stats.filtered||[]).map((t,idx)=>{
                 const stratM = (t.notes||"").match(/STRATEGY:\s*([^|]+)/i);
                 const stratTxt = stratM && stratM[1] ? stratM[1].trim() : "";
-                const jScoreV2 = (t.notes||"").match(/JRNL_V2:[\s\S]*?SCORE\s*=\s*(\d+)/i);
-                const jScoreLegacy = (t.notes||"").match(/JRNL_SCORE:\s*(\d+)/i);
-                const jScore = jScoreV2 ? jScoreV2[1] : (jScoreLegacy ? jScoreLegacy[1] : null);
-                const mCsv = (t.notes||"").match(/MISTAKES\s*=\s*([^\s;|]+)/i);
-                const mistakes = mCsv && mCsv[1] && mCsv[1].toLowerCase()!=="none"
-                  ? mCsv[1].split(",").map(s=>s.trim()).filter(Boolean)
-                  : [];
                 const pnl = pnlOf(t);
                 const rowNo = stats.filtered.length - idx;
 
                 const ds = t.__when?.dateShiftedStr || t.date || "—";
                 const ts = t.__when?.timeShiftedStr || (t.trade_time ? String(t.trade_time).slice(0,5) : "—");
+                const durM = (()=>{ const m = String(t.notes||"").match(/DURATION_MIN\s*=?\s*([0-9]+(?:\.[0-9]+)?)/i); return m? Number(m[1]) : null; })();
 
                 return (
-                  <tr
-                    key={t.id}
-                    className="border-b align-top"
-                    style={{borderColor:tokens.grid}}
-                    onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
-                    onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}
-                  >
+                  <tr key={t.id} className="border-b align-top" style={{borderColor:tokens.grid}}
+                      onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
+                      onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}>
                     <Td><span className="px-2 py-0.5 text-[11px] rounded-md" style={{background:"#1f2937", color:"#d1d5db"}} title={"Trade id "+t.id}>{rowNo}</span></Td>
                     <Td>{ds ? new Date(ds+"T00:00:00").toLocaleDateString() : "—"}</Td>
                     <Td>{ts}</Td>
@@ -1117,34 +899,13 @@ export default function TraderLab() {
                     <Td>{t.size ?? "—"}</Td>
                     <Td>{money(t.fee)}</Td>
                     <Td style={{color:(pnl>=0)?tokens.success:tokens.danger, fontWeight:600}}>{money(pnl)}</Td>
-
-                    <Td>{jScore ? <span title="Discipline Score">{jScore}</span> : <span style={{color:tokens.muted}}>—</span>}</Td>
+                    <Td>{durM!=null ? `${durM.toFixed(0)} min` : <span style={{color:tokens.muted}}>—</span>}</Td>
+                    <Td className="truncate" title={stratTxt || ""}>{stratTxt || "—"}</Td>
                     <Td>
-                      {mistakes.length
-                        ? <div className="flex flex-wrap gap-1" style={{maxWidth:220}}>{mistakes.map(m=>(
-                            <span key={m} className="px-1.5 py-0.5 border rounded-md text-[11px]" style={{borderColor:tokens.grid}}>{m}</span>
-                          ))}</div>
-                        : <span style={{color:tokens.muted}}>—</span>}
+                      {(t.notes && t.notes.trim())
+                        ? <button className="px-2 py-1 text-xs rounded-md border" style={{borderColor:tokens.grid}} onClick={()=>openNotesEditor(t)}>Edit</button>
+                        : <button className="px-2 py-1 text-xs rounded-md border" style={{borderColor:tokens.grid}} onClick={()=>openNotesEditor(t)}>Add</button>}
                     </Td>
-
-                    <Td className="truncate" title={stratTxt}>{stratTxt || "—"}</Td>
-
-                    <Td>
-                      <div className="flex items-center gap-2">
-                        {(t.notes && t.notes.trim())
-                          ? <button
-                              className="px-2 py-1 text-xs rounded-md border"
-                              style={{borderColor:tokens.grid}}
-                              onClick={()=>openNotesEditor(t)}
-                            >Edit</button>
-                          : <button
-                              className="px-2 py-1 text-xs rounded-md border"
-                              style={{borderColor:tokens.grid}}
-                              onClick={()=>openNotesEditor(t)}
-                            >Add</button>}
-                      </div>
-                    </Td>
-
                     <Td>
                       <div className="flex flex-col gap-1">
                         <label className="text-xs px-2 py-1 rounded-lg border cursor-pointer inline-block text-center" style={{borderColor:tokens.grid}}>
@@ -1168,7 +929,7 @@ export default function TraderLab() {
                 );
               })}
               {(!stats.filtered || stats.filtered.length===0) && (
-                <tr><td className="py-4" style={{color:tokens.muted}} colSpan={14}>{loading?"Loading…":"No trades yet. Try uploading a CSV."}</td></tr>
+                <tr><td className="py-4" style={{color:tokens.muted}} colSpan={13}>{loading?"Loading…":"No trades yet. Try uploading a CSV."}</td></tr>
               )}
             </tbody>
           </table>
@@ -1180,66 +941,40 @@ export default function TraderLab() {
           accounts={accounts}
           selectedId={accountId}
           onClose={()=>setShowMgr(false)}
-          onSelect={async (id)=>{
-            setAccountId(String(id));
-            try{localStorage.setItem(LAST_ACCOUNT_KEY,String(id));}catch{}
-            await loadTrades(String(id));
-            try{
-              setPnlMult(Number(localStorage.getItem(pnlMultKey(id))||1));
-              setAcctSize(Number(localStorage.getItem(acctSizeKey(id))||0));
-            }catch{}
-          }}
-          onRename={renameAccount}
-          onDelete={deleteAccount}
+          onSelect={async (id)=>{ setAccountId(String(id)); try{localStorage.setItem(LAST_ACCOUNT_KEY,String(id));}catch{} await loadTrades(String(id));
+            try{ setPnlMult(Number(localStorage.getItem(pnlMultKey(id))||1)); setAcctSize(Number(localStorage.getItem(acctSizeKey(id))||0)); }catch{} }}
+          onRename={renameAccount} onDelete={deleteAccount}
         />
       )}
 
       {notesOpen && (
-        <NotesModal
-          title={notesTitle}
-          content={notesContent}
-          setContent={setNotesContent}
-          onClose={()=>setNotesOpen(false)}
-          onSave={saveNotes}
-          saving={savingNotes}
-        />
+        <NotesModal title={notesTitle} content={notesContent} setContent={setNotesContent}
+                    onClose={()=>setNotesOpen(false)} onSave={saveNotes} saving={savingNotes} />
       )}
     </div>
   );
 }
 
-/* ------------ UI atoms & small comps ------------ */
-function KPI(props){
+/* ------------ UI atoms & components ------------ */
+function KPI({label,value}) {
   return (
     <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
-      <div className="text-xs" style={{color:tokens.muted}}>{props.label}</div>
-      <div className="text-lg font-semibold mt-1">{props.value}</div>
+      <div className="text-xs" style={{color:tokens.muted}}>{label}</div>
+      <div className="text-lg font-semibold mt-1">{value}</div>
     </div>
   );
 }
-function Th(props){
-  return <th className="py-2 pr-3 text-[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>;
-}
-function Td(props){
-  return <td className={"py-1.5 pr-3 "+(props.className||"")}>{props.children}</td>;
-}
-
+function Th(props){ return <th className="py-2 pr-3 text-[11px] font-semibold" style={{color:tokens.muted, ...(props.style||{})}}>{props.children}</th>; }
+function Td(props){ return <td className={"py-1.5 pr-3 "+(props.className||"")}>{props.children}</td>; }
 function Input(props){
   const handleChange = React.useCallback((e)=>{ props.onChange?.(e.target.value); }, [props.onChange]);
   return (
     <div className={props.className || ""}>
       <label className="text-xs" style={{color:tokens.muted}}>{props.label}</label>
-      <input
-        className="qe-field mt-1"
-        type={props.type || "text"}
-        value={props.value}
-        onChange={handleChange}
-        placeholder={props.placeholder}
-      />
+      <input className="qe-field mt-1" type={props.type || "text"} value={props.value} onChange={handleChange} placeholder={props.placeholder}/>
     </div>
   );
 }
-
 function Select(props){
   const handleChange = React.useCallback((e)=>{ props.onChange?.(e.target.value); }, [props.onChange]);
   return (
@@ -1251,9 +986,8 @@ function Select(props){
     </div>
   );
 }
-
-function CsvPreview(props){
-  const rows = props.rows || [];
+function CsvPreview({rows}){
+  rows = rows || [];
   if (!rows.length) return <div className="text-xs" style={{color:tokens.muted}}>Empty</div>;
   const headers = Object.keys(rows[0] || {});
   return (
@@ -1266,13 +1000,9 @@ function CsvPreview(props){
         </thead>
         <tbody>
           {rows.slice(0,200).map((row,i)=>(
-            <tr
-              key={i}
-              className="border-b"
-              style={{borderColor:tokens.grid}}
-              onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
-              onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}
-            >
+            <tr key={i} className="border-b" style={{borderColor:tokens.grid}}
+                onMouseEnter={(e)=>{e.currentTarget.style.background=rgba("#ffffff",0.035);}}
+                onMouseLeave={(e)=>{e.currentTarget.style.background="transparent";}}>
               {headers.map(h=> <td key={h} className="py-2 pr-4 whitespace-nowrap">{String(row[h] ?? "")}</td>)}
             </tr>
           ))}
@@ -1282,8 +1012,6 @@ function CsvPreview(props){
     </div>
   );
 }
-
-/* ---- slimmer Account Manager ---- */
 function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}){
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -1297,8 +1025,7 @@ function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}
             <div key={a.id} className="flex items-center justify-between gap-2 py-1">
               <button className="text-left flex-1 underline truncate"
                       style={{color: String(selectedId)===String(a.id) ? "#e5edf7" : tokens.muted}}
-                      title={a.name || ("Acc "+a.id)}
-                      onClick={()=>onSelect(a.id)}>
+                      title={a.name || ("Acc "+a.id)} onClick={()=>onSelect(a.id)}>
                 {a.name || ("Acc "+a.id)}
               </button>
               <div className="flex items-center gap-2">
@@ -1313,8 +1040,6 @@ function AccountManager({accounts,selectedId,onClose,onSelect,onRename,onDelete}
     </div>
   );
 }
-
-/* ---- Notes Modal (editable) ---- */
 function NotesModal({ title, content, setContent, onClose, onSave, saving }){
   const copy = () => { try { navigator.clipboard.writeText(content || ""); } catch {} };
   return (
@@ -1330,13 +1055,7 @@ function NotesModal({ title, content, setContent, onClose, onSave, saving }){
           </div>
         </div>
         <div className="p-3 md:p-4">
-          <textarea
-            className="qe-field w-full"
-            rows={12}
-            value={content}
-            onChange={(e)=>setContent?.(e.target.value)}
-            placeholder="Write notes for this trade (free text)."
-          />
+          <textarea className="qe-field w-full" rows={12} value={content} onChange={(e)=>setContent?.(e.target.value)} placeholder="Write notes for this trade (free text)."/>
           <div className="mt-3 flex items-center justify-end gap-2">
             <button className="px-3 py-2 rounded-lg border text-sm" style={{borderColor:tokens.grid}} onClick={onClose}>Cancel</button>
             <button className="px-3 py-2 rounded-lg text-white text-sm disabled:opacity-60" style={{background:tokens.primary}} onClick={onSave} disabled={!!saving}>
@@ -1348,35 +1067,66 @@ function NotesModal({ title, content, setContent, onClose, onSave, saving }){
     </div>
   );
 }
+function PayoutCard({ payout }){
+  const metAll = payout.minDaysMet && payout.profitTargetMet && payout.consistencyMet;
+  return (
+    <div className="rounded-2xl border p-4 md:p-5" style={{borderColor:tokens.grid, background:"rgba(255,255,255,0.02)"}}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-lg font-semibold">Payout Consistency</div>
+        <div className={"px-3 py-1 rounded-full text-xs font-medium"}
+             style={{background: metAll? "rgba(16,185,129,.15)" : "rgba(148,163,184,.15)",
+                     color: metAll? "#10b981" : "#94a3b8"}}>
+          {metAll ? "Ready" : "Not Yet"}
+        </div>
+      </div>
 
-/* ---- Day table ---- */
-function DayTable({ title, rows, losing=false }){
+      {/* three-line block like screenshot */}
+      <div className="rounded-xl border p-3 md:p-4 space-y-3" style={{borderColor:tokens.grid, background:"rgba(255,255,255,0.03)"}}>
+        <Row label="Highest Profit Day" value={money(payout.highestProfitDay)} />
+        <Divider />
+        <Row label="Current Total Profit (positive days only)" value={money(payout.totalPositiveProfit)} />
+        <Divider />
+        <Row label={`Minimum required total profit (15%)`} value={money(payout.minTotalForConsistency)} icon="⏱" />
+      </div>
+
+      <div className="grid md:grid-cols-3 gap-3 mt-4">
+        <Mini
+          title="Min Profitable Days (≥ 0.5%)"
+          value={`${payout.qualifyingDaysCount} / ${payout.needMinDays}`}
+          ok={payout.minDaysMet}
+          hint={!payout.minDaysMet ? `Need ${payout.needMoreMinDays} more day(s) ≥ ${money(payout.minDayDollar)}` : "Met"}
+        />
+        <Mini
+          title="Profit Target (≥ 7%)"
+          value={payout.profitTargetMet ? "Met" : "Not Yet"}
+          ok={payout.profitTargetMet}
+          hint={!payout.profitTargetMet ? `Need ${money(payout.needMoreForTarget)} more net profit` : "Met"}
+        />
+        <Mini
+          title="Consistency (≤ 15% on best day)"
+          value={payout.consistencyMet ? "Compliant" : "Not Yet"}
+          ok={payout.consistencyMet}
+          hint={!payout.consistencyMet ? `Gain ${money(payout.needMoreForConsistency)} more on other days` : "Met"}
+        />
+      </div>
+    </div>
+  );
+}
+function Row({label,value,icon}) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="flex items-center gap-2">{icon ? <span>{icon}</span> : null}{label}</span>
+      <span className="font-semibold">{value}</span>
+    </div>
+  );
+}
+function Divider(){ return <div className="h-px" style={{background:tokens.grid}}/>; }
+function Mini({title,value,ok,hint}) {
   return (
     <div className="rounded-xl border p-3" style={{borderColor:tokens.grid}}>
-      <div className="text-sm mb-2" style={{color:tokens.muted}}>{title}</div>
-      <div className="overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left border-b" style={{borderColor:tokens.grid}}>
-              <th className="py-2 pr-3 text-xs" style={{color:tokens.muted}}>Date</th>
-              <th className="py-2 pr-3 text-xs" style={{color:tokens.muted}}>P&L</th>
-              <th className="py-2 pr-3 text-xs" style={{color:tokens.muted}}>Trades</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(rows||[]).map(r=>(
-              <tr key={r.date} className="border-b" style={{borderColor:tokens.grid}}>
-                <td className="py-2 pr-3">{new Date(r.date+"T00:00:00").toLocaleDateString()}</td>
-                <td className="py-2 pr-3" style={{color: (r.pnl>=0?tokens.success:tokens.danger), fontWeight:600}}>{money(r.pnl)}</td>
-                <td className="py-2 pr-3">{r.trades}</td>
-              </tr>
-            ))}
-            {(!rows || rows.length===0) && (
-              <tr><td className="py-3 text-xs" style={{color:tokens.muted}} colSpan={3}>No days to show.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <div className="text-xs" style={{color:tokens.muted}}>{title}</div>
+      <div className="text-base font-semibold mt-1" style={{color: ok ? tokens.success : "#e5edf7"}}>{value}</div>
+      <div className="text-xs mt-1" style={{color:tokens.muted}}>{hint}</div>
     </div>
   );
 }
