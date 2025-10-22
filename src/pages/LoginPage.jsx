@@ -5,9 +5,6 @@ import { apiNoAuth, apiPath } from "../api/axios";
 import logo from "../assets/QELOGO.png";
 import WhyTeach from "../components/WhyTeach.jsx";
 
-/**
- * Marketing + Login page (revamped)
- */
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -16,13 +13,14 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const WEBINARS = useMemo(() => [], []);
-
+  // External links
+  const BOOKING_URL = "https://calendar.app.google/GBw1pWs4cs1CQSYq5"; // Book consultation (opens new tab)
+  const COMMUNITY_CHAT_URL = "https://buy.stripe.com/28EbJ19uygPtaT7ct52Nq07"; // Community Chat ($20)
   const PTB_URL =
     "https://dashboard.plutustradebase.com/challenges?affiliateId=quantumedge.fx";
 
-  // Community Chat (Stripe Payment Link)
-  const COMMUNITY_CHAT_URL = "https://buy.stripe.com/28EbJ19uygPtaT7ct52Nq07";
+  // Keep placeholder for future webinar tiles
+  const WEBINARS = useMemo(() => [], []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -60,11 +58,11 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen px-4 md:px-6 lg:px-8 py-8">
       <div className="max-w-7xl mx-auto grid lg:grid-cols-[1.25fr_.9fr] gap-8">
-        {/* LEFT — marketing column */}
+        {/* LEFT — marketing / home-like column */}
         <section className="space-y-6">
-          {/* Hero */}
-          <div className="rounded-2xl p-6 md:p-7 border border-white/10 bg-[color:var(--card,#0A0F16)]">
-            <div className="flex items-center gap-3 mb-4">
+          {/* HERO */}
+          <div className="rounded-2xl p-6 md:p-8 border border-white/10 bg-[color:var(--card,#0A0F16)]">
+            <div className="flex flex-wrap items-center gap-3 mb-5">
               <img src={logo} alt="QuantumEdge" className="h-9" />
               <h1 className="text-2xl md:text-3xl font-semibold text-neutral-100">
                 Trade with a system.{" "}
@@ -72,51 +70,68 @@ export default function LoginPage() {
               </h1>
             </div>
 
-            <p className="text-sm md:text-base text-neutral-400 leading-relaxed">
-              QuantumEdge brings together <span className="text-neutral-200">TraderLab</span>, journaling,
-              analytics, psych profile, charts, and the FX calendar—designed to help you repeat what works.
+            <p className="text-sm md:text-base text-neutral-400 leading-relaxed max-w-3xl">
+              QuantumEdge unifies <span className="text-neutral-200">TraderLab</span>, journaling,
+              analytics, psych profile, charts, and the FX calendar—so you can repeat what works,
+              fix what doesn’t, and grow with real feedback.
             </p>
 
-            {/* Coaching note */}
-            <div className="mt-4 text-[13px] text-neutral-300">
-              <span className="font-medium text-cyan-300">Coaching:</span>{" "}
-              Need a plan, accountability, and feedback? Book a consultation below and we’ll map your next month.
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-3 mt-5">
-              <ValueCard title="TraderLab">P&amp;L + hour-of-day win%, attachments, notes.</ValueCard>
-              <ValueCard title="Psych Profile">Archetype quiz + prompts to reduce impulsive errors.</ValueCard>
-              <ValueCard title="Webinars">Weekly topics &amp; Q&amp;A (recordings as available).</ValueCard>
-              <ValueCard title="Courses">Strategy and psychology drills for consistency.</ValueCard>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center gap-3">
+            {/* Primary CTAs (no embed—just links) */}
+            <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 to="/register"
-                className="px-4 py-2 rounded-xl font-semibold bg-[color:var(--accent)] hover:opacity-90"
+                className="px-5 py-2.5 rounded-xl font-semibold bg-[color:var(--accent)] hover:opacity-90"
                 style={{ color: "#0B0F16" }}
               >
-                Create your account
+                Create Account
               </Link>
               <Link
                 to="/pricing"
-                className="px-4 py-2 rounded-xl border border-white/10 text-neutral-200 hover:bg-white/5"
+                className="px-5 py-2.5 rounded-xl border border-white/10 text-neutral-200 hover:bg-white/5"
               >
-                View pricing
+                View Pricing
               </Link>
+              <a
+                href={BOOKING_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="px-5 py-2.5 rounded-xl border border-cyan-400/40 text-cyan-300 hover:bg-cyan-500/10"
+                title="Schedule a coaching consultation"
+              >
+                Book Consultation
+              </a>
+              <a
+                href={COMMUNITY_CHAT_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="px-5 py-2.5 rounded-xl bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 hover:bg-cyan-500/30"
+                title="Join the Community Chat"
+              >
+                Join Community Chat ($20)
+              </a>
+            </div>
+
+            {/* Feature Highlights */}
+            <div className="grid sm:grid-cols-2 gap-3 mt-6">
+              <ValueCard title="TraderLab">
+                P&amp;L by day/hour, win%, attachments, and notes—see exactly what’s working.
+              </ValueCard>
+              <ValueCard title="Psych Profile">
+                Archetype quiz + prompts to curb impulsive errors and build consistency.
+              </ValueCard>
+              <ValueCard title="Webinars">
+                Weekly topics &amp; Q&amp;A. Replays when available.
+              </ValueCard>
+              <ValueCard title="Courses">
+                Strategy + psychology drills to turn edge into process.
+              </ValueCard>
             </div>
           </div>
 
-          {/* Booking (readable on dark) */}
-          <BookingCard communityUrl={COMMUNITY_CHAT_URL} />
-
-          {/* Community Chat direct card */}
-          <CommunityChatCard href={COMMUNITY_CHAT_URL} />
-
-          {/* Webinars (kept minimal) */}
+          {/* Webinar teaser (kept minimal) */}
           <WebinarSchedule items={WEBINARS} />
 
-          {/* PTB affiliate */}
+          {/* PTB affiliate block */}
           <a
             href={PTB_URL}
             target="_blank"
@@ -147,10 +162,11 @@ export default function LoginPage() {
             </div>
           </a>
 
+          {/* Socials */}
           <SocialRow />
         </section>
 
-        {/* RIGHT — sign-in */}
+        {/* RIGHT — Sign-in */}
         <aside>
           <div className="w-full max-w-md ml-auto rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)] sticky top-6">
             <div className="mb-5">
@@ -208,7 +224,7 @@ export default function LoginPage() {
         </aside>
       </div>
 
-      {/* Why I Teach — big block at very bottom */}
+      {/* Why I Teach — large section at the very bottom */}
       <div className="max-w-7xl mx-auto mt-8">
         <div className="rounded-2xl p-6 md:p-8 border border-white/10 bg-[color:var(--card,#0A0F16)]">
           <WhyTeach />
@@ -218,105 +234,11 @@ export default function LoginPage() {
   );
 }
 
-/* ----------------- Sub-components ----------------- */
-
-function BookingCard({ communityUrl }) {
-  return (
-    <div className="rounded-2xl p-6 border border-white/10 bg-[color:var(--card,#0A0F16)]">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <div className="text-sm uppercase tracking-wide text-neutral-400">
-            Book a call
-          </div>
-          <div className="text-lg font-semibold text-neutral-100">
-            Schedule with Quantum Edge
-          </div>
-        </div>
-        <a
-          href="https://calendar.app.google/GBw1pWs4cs1CQSYq5"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
-        >
-          Open in new tab
-        </a>
-      </div>
-
-      {/* Light surface behind the iframe so it’s readable on dark themes */}
-      <div className="rounded-xl overflow-hidden border border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
-        <div className="bg-white text-black">
-          <iframe
-            title="QE Booking"
-            src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ0vefJPjY1lSYg2NjwZwOS81xtRHuv6ttWsM0ivFz8hBMb7PbWrhzYLyYP-qs3jxf3jaFNjvCQK?gv=true"
-            style={{ border: 0 }}
-            width="100%"
-            height="640"
-            frameBorder="0"
-          />
-        </div>
-      </div>
-
-      <div className="mt-3 text-xs text-neutral-400">
-        If the embed doesn’t load, use the button above to open the booking page.
-      </div>
-
-      {/* Small CTA row below booking */}
-      <div className="mt-5 grid sm:grid-cols-2 gap-3">
-        <Link
-          to="/pricing"
-          className="text-center px-4 py-2 rounded-xl border border-white/10 text-neutral-200 hover:bg-white/5"
-        >
-          View coaching & plans
-        </Link>
-        {communityUrl && (
-          <a
-            href={communityUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-center px-4 py-2 rounded-xl bg-[color:var(--accent)] font-semibold hover:opacity-90"
-            style={{ color: "#0B0F16" }}
-          >
-            Join Community Chat ($20)
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CommunityChatCard({ href }) {
-  if (!href) return null;
-  return (
-    <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-sm uppercase tracking-wide text-neutral-400">
-            Community
-          </div>
-          <div className="text-lg font-semibold text-neutral-100">
-            Trader Community Chat
-          </div>
-          <p className="text-sm text-neutral-400 mt-1">
-            Daily discussion, charts, accountability, and notes. Keep your edge sharp with peers.
-          </p>
-        </div>
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className="shrink-0 inline-flex items-center px-4 py-2 rounded-lg bg-[color:var(--accent)] font-semibold hover:opacity-90"
-          style={{ color: "#0B0F16" }}
-        >
-          Join for $20 →
-        </a>
-      </div>
-    </div>
-  );
-}
+/* ---------- Sub-components ---------- */
 
 function ValueCard({ title, children }) {
   return (
-    <div className="rounded-xl p-3 border border-white/10 bg-black/20">
+    <div className="rounded-xl p-4 border border-white/10 bg-black/20">
       <div className="text-sm font-medium text-neutral-100">{title}</div>
       <p className="text-xs text-neutral-400 mt-1">{children}</p>
     </div>
@@ -329,15 +251,12 @@ function WebinarSchedule({ items }) {
     <div className="rounded-2xl p-5 border border-white/10 bg-[color:var(--card,#0A0F16)]">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="text-sm uppercase tracking-wide text-neutral-400">
-            Webinar schedule
-          </div>
+          <div className="text-sm uppercase tracking-wide text-neutral-400">Webinar Schedule</div>
           <div className="text-lg font-semibold text-neutral-100">What’s coming up</div>
         </div>
         <Link
           to="/pricing"
           className="text-sm px-3 py-1.5 rounded-lg border border-white/10 text-neutral-200 hover:bg-white/5"
-          title="See plans"
         >
           See plans
         </Link>
@@ -383,7 +302,6 @@ function SocialRow() {
     { href: "http://tiktok.com/@quantum.edge.fx", label: "TikTok", icon: TikTokIcon },
     { href: "https://www.facebook.com/profile.php?id=61579183787818", label: "Facebook", icon: FacebookIcon },
   ];
-
   return (
     <div className="rounded-2xl p-4 border border-white/10 bg-[color:var(--card,#0A0F16)]">
       <div className="text-sm text-neutral-400 mb-3">Follow along</div>
